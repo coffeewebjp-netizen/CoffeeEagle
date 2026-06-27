@@ -1,0 +1,13 @@
+﻿# Build output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Local signing and tool caches
+.tools/
+
+# IDE/user files
+.vs/
+*.user
+*.suo

@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CoffeeEagle.Reader/CoffeeEagle.Reader.csproj" />
+  </Folder>
+</Solution>

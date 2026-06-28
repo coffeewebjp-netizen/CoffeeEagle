@@ -62,7 +62,7 @@ public sealed class EagleLibraryIndexer
         NormalizeFolderPaths(folders);
         var mtimeIndex = await ReadMtimeIndexAsync(mtimeEntry, cancellationToken);
         progress?.Report("メディア情報を索引化中...");
-        var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, mtimeIndex, progress, cancellationToken);
+        var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, mtimeIndex, previous, progress, cancellationToken);
         var assets = scan.Assets;
         EnsureReferencedFolders(folders, assets);
         NormalizeFolderPaths(folders);
@@ -94,6 +94,7 @@ public sealed class EagleLibraryIndexer
         string treeUriString,
         DocumentEntry imagesDirectory,
         MtimeIndex mtimeIndex,
+        EagleLibrary? previous,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
@@ -105,6 +106,7 @@ public sealed class EagleLibraryIndexer
             MtimeDeclaredTotal = mtimeIndex.DeclaredTotal
         };
         var assets = scan.Assets;
+        var previousAssets = CreatePreviousAssetLookup(previous);
         var seenInfoIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pendingDirectories = new Queue<DocumentEntry>();
         pendingDirectories.Enqueue(imagesDirectory);
@@ -136,15 +138,21 @@ public sealed class EagleLibraryIndexer
                 if (child.Name.EndsWith(".info", StringComparison.OrdinalIgnoreCase))
                 {
                     scan.InfoDirectories++;
-                    seenInfoIds.Add(TrimInfoSuffix(child.Name));
-                    var asset = await TryReadAssetAsync(treeUriString, child, scan, cancellationToken);
+                    var infoId = TrimInfoSuffix(child.Name);
+                    seenInfoIds.Add(infoId);
+                    if (TryReusePreviousAsset(infoId, mtimeIndex, previousAssets, out var reusedAsset))
+                    {
+                        scan.ReusedAssets++;
+                        assets.Add(reusedAsset);
+                        ReportAssetProgress(assets.Count, scan.ReusedAssets, progress, "索引化中");
+                        continue;
+                    }
+
+                    var asset = await TryReadAssetAsync(treeUriString, child, scan, GetMtimeStamp(mtimeIndex, infoId), cancellationToken);
                     if (asset is not null)
                     {
                         assets.Add(asset);
-                        if (assets.Count % 50 == 0)
-                        {
-                            progress?.Report($"{assets.Count} 件を索引化中...");
-                        }
+                        ReportAssetProgress(assets.Count, scan.ReusedAssets, progress, "索引化中");
                     }
                 }
                 else
@@ -205,12 +213,100 @@ public sealed class EagleLibraryIndexer
             scan.MtimeDirectHits++;
             scan.InfoDirectories++;
             seenInfoIds.Add(assetId);
-            var asset = await TryReadAssetAsync(treeUriString, infoDirectory, scan, cancellationToken);
+            var asset = await TryReadAssetAsync(treeUriString, infoDirectory, scan, GetMtimeStamp(mtimeIndex, assetId), cancellationToken);
             if (asset is not null)
             {
                 scan.Assets.Add(asset);
                 scan.MtimeRecoveredIds++;
             }
+        }
+    }
+
+    private static Dictionary<string, EagleAsset> CreatePreviousAssetLookup(EagleLibrary? previous)
+    {
+        var lookup = new Dictionary<string, EagleAsset>(StringComparer.OrdinalIgnoreCase);
+        if (previous?.Assets is null)
+        {
+            return lookup;
+        }
+
+        foreach (var asset in previous.Assets)
+        {
+            AddPreviousAsset(lookup, asset.SourceInfoId, asset);
+            AddPreviousAsset(lookup, asset.Id, asset);
+        }
+
+        return lookup;
+    }
+
+    private static void AddPreviousAsset(Dictionary<string, EagleAsset> lookup, string? key, EagleAsset asset)
+    {
+        if (!string.IsNullOrWhiteSpace(key) && !lookup.ContainsKey(key))
+        {
+            lookup[key] = asset;
+        }
+    }
+
+    private static bool TryReusePreviousAsset(
+        string infoId,
+        MtimeIndex mtimeIndex,
+        IReadOnlyDictionary<string, EagleAsset> previousAssets,
+        out EagleAsset asset)
+    {
+        asset = null!;
+        if (!mtimeIndex.Found
+            || mtimeIndex.ReadFailed
+            || !mtimeIndex.AssetModifiedAt.TryGetValue(infoId, out var sourceModifiedStamp)
+            || sourceModifiedStamp <= 0
+            || !previousAssets.TryGetValue(infoId, out var previous)
+            || previous.SourceModifiedStamp != sourceModifiedStamp)
+        {
+            return false;
+        }
+
+        asset = CloneAsset(previous);
+        asset.SourceInfoId = string.IsNullOrWhiteSpace(asset.SourceInfoId) ? infoId : asset.SourceInfoId;
+        asset.SourceModifiedStamp = sourceModifiedStamp;
+        return true;
+    }
+
+    private static EagleAsset CloneAsset(EagleAsset source)
+    {
+        return new EagleAsset
+        {
+            Id = source.Id,
+            Name = source.Name,
+            FileName = source.FileName,
+            Extension = source.Extension,
+            FileUri = source.FileUri,
+            ThumbnailUri = source.ThumbnailUri,
+            MediaKind = source.MediaKind,
+            SourceInfoId = source.SourceInfoId,
+            SourceModifiedStamp = source.SourceModifiedStamp,
+            FolderIds = source.FolderIds.ToList(),
+            Tags = source.Tags.ToList(),
+            SourceUrl = source.SourceUrl,
+            Annotation = source.Annotation,
+            SizeBytes = source.SizeBytes,
+            Width = source.Width,
+            Height = source.Height,
+            CreatedAt = source.CreatedAt,
+            ModifiedAt = source.ModifiedAt
+        };
+    }
+
+    private static long GetMtimeStamp(MtimeIndex mtimeIndex, string infoId)
+    {
+        return mtimeIndex.AssetModifiedAt.TryGetValue(infoId, out var sourceModifiedStamp)
+            ? sourceModifiedStamp
+            : 0;
+    }
+
+    private static void ReportAssetProgress(int assetCount, int reusedAssets, IProgress<string>? progress, string message)
+    {
+        if (assetCount > 0 && assetCount % 50 == 0)
+        {
+            progress?.Report($"{assetCount} 件を{message}... reused {reusedAssets}");
         }
     }
 
@@ -252,6 +348,7 @@ public sealed class EagleLibraryIndexer
         string treeUriString,
         DocumentEntry infoDirectory,
         AssetScanResult scan,
+        long sourceModifiedStamp,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<DocumentEntry> children;
@@ -305,6 +402,8 @@ public sealed class EagleLibraryIndexer
                 FileUri = primaryFile?.Uri ?? thumbnail?.Uri,
                 ThumbnailUri = thumbnail?.Uri ?? (mediaKind == EagleAssetMediaKind.Image ? primaryFile?.Uri : null),
                 MediaKind = mediaKind,
+                SourceInfoId = TrimInfoSuffix(infoDirectory.Name),
+                SourceModifiedStamp = sourceModifiedStamp,
                 FolderIds = ReadStringArray(root, "folders", "folderIds", "folderId")
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
@@ -380,6 +479,7 @@ public sealed class EagleLibraryIndexer
         public int ImageFiles { get; set; }
         public int MediaFiles { get; set; }
         public int AssetReadFailures { get; set; }
+        public int ReusedAssets { get; set; }
         public bool MtimeFound { get; set; }
         public bool MtimeReadFailed { get; set; }
         public int MtimeAssetIds { get; set; }
@@ -406,7 +506,7 @@ public sealed class EagleLibraryIndexer
                 mtimeMessage += ", mtime-read-fail";
             }
 
-            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}{mtimeMessage}";
+            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, reused {ReusedAssets}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}{mtimeMessage}";
         }
     }
 

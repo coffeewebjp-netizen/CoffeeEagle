@@ -101,6 +101,11 @@ public sealed class EagleLibraryStore
                 {
                     asset.MediaKind = EagleAssetMediaKind.Image;
                 }
+
+                if (string.IsNullOrWhiteSpace(asset.SourceInfoId))
+                {
+                    asset.SourceInfoId = asset.Id;
+                }
             }
         }
 

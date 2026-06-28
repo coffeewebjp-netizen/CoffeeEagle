@@ -16,6 +16,10 @@ public sealed class EagleAsset
 
     public string MediaKind { get; set; } = EagleAssetMediaKind.Image;
 
+    public string? SourceInfoId { get; set; }
+
+    public long SourceModifiedStamp { get; set; }
+
     public List<string> FolderIds { get; set; } = [];
 
     public List<string> Tags { get; set; } = [];

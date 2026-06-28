@@ -12,6 +12,7 @@ public sealed class BookshelfPage : ContentPage
     private readonly EagleLibraryStore _store;
     private readonly EagleLibraryIndexer _indexer;
     private readonly EagleImageSourceService _imageSources;
+    private readonly GoogleDriveLibraryService _drive;
     private readonly List<EagleLibrary> _libraries = [];
     private readonly List<EagleAsset> _visibleAssets = [];
     private readonly CollectionView _assetsView = new();
@@ -64,11 +65,13 @@ public sealed class BookshelfPage : ContentPage
     public BookshelfPage(
         EagleLibraryStore store,
         EagleLibraryIndexer indexer,
-        EagleImageSourceService imageSources)
+        EagleImageSourceService imageSources,
+        GoogleDriveLibraryService drive)
     {
         _store = store;
         _indexer = indexer;
         _imageSources = imageSources;
+        _drive = drive;
 
         Title = "CoffeeEagle";
         BackgroundColor = Color.FromArgb("#0B0E12");
@@ -79,7 +82,7 @@ public sealed class BookshelfPage : ContentPage
         _tagButton = CreateHeaderButton("Tag");
         _densityButton = CreateHeaderButton("3x");
         _refreshButton = CreateHeaderButton("更新");
-        _googleDriveSelectButton = CreatePrimaryButton("Google Driveから選択");
+        _googleDriveSelectButton = CreatePrimaryButton("Google Drive APIで追加");
         _deviceFolderSelectButton = CreateSecondaryButton("端末/同期フォルダを選択");
         _emptyActions = CreateEmptyActions();
         _libraryButton.Clicked += async (_, _) => await ShowLibraryMenuAsync();
@@ -87,7 +90,7 @@ public sealed class BookshelfPage : ContentPage
         _tagButton.Clicked += async (_, _) => await ShowTagMenuAsync();
         _densityButton.Clicked += async (_, _) => await CycleDensityAsync();
         _refreshButton.Clicked += async (_, _) => await RefreshActiveLibraryAsync();
-        _googleDriveSelectButton.Clicked += async (_, _) => await AddLibraryAsync(preferGoogleDrive: true);
+        _googleDriveSelectButton.Clicked += async (_, _) => await AddGoogleDriveApiLibraryAsync();
         _deviceFolderSelectButton.Clicked += async (_, _) => await AddLibraryAsync();
         _searchBar.TextChanged += (_, e) => UpdateSearch(e.NewTextValue ?? string.Empty);
         _searchBar.SearchButtonPressed += async (_, _) => await SaveStateAsync();
@@ -232,17 +235,147 @@ public sealed class BookshelfPage : ContentPage
         await IndexLibraryAsync(treeUri, previous: null);
     }
 
+    private async Task AddGoogleDriveApiLibraryAsync()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        var clientId = await DisplayPromptAsync(
+            "Google Drive API",
+            "Google OAuth Client IDを入力してください。",
+            initialValue: string.IsNullOrWhiteSpace(_state.GoogleDriveClientId) ? GoogleDriveLibraryService.DefaultClientId : _state.GoogleDriveClientId,
+            keyboard: Keyboard.Text);
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return;
+        }
+
+        var folderInput = await DisplayPromptAsync(
+            "Google Drive API",
+            "EAGLE .libraryフォルダのURLまたはフォルダIDを入力してください。",
+            initialValue: _state.GoogleDriveFolderId ?? string.Empty,
+            keyboard: Keyboard.Text);
+        if (string.IsNullOrWhiteSpace(folderInput))
+        {
+            return;
+        }
+
+        var folderId = GoogleDriveLibraryService.ExtractFolderId(folderInput);
+        if (string.IsNullOrWhiteSpace(folderId))
+        {
+            await DisplayAlertAsync("Google Drive API", "フォルダIDを読み取れませんでした。", "OK");
+            return;
+        }
+
+        _state.GoogleDriveClientId = clientId.Trim();
+        _state.GoogleDriveClientSecret = null;
+        _state.GoogleDriveFolderId = folderId;
+        await SaveStateAsync();
+
+        var progress = new Progress<string>(message => _summaryLabel.Text = message);
+        if (!await _drive.HasRefreshTokenAsync())
+        {
+            var connect = await DisplayAlertAsync(
+                "Google Drive接続",
+                "Googleログインを開き、Driveの読み取りを許可します。",
+                "接続",
+                "キャンセル");
+            if (!connect)
+            {
+                return;
+            }
+
+            SetBusy(true, "Google Drive認証中...");
+            try
+            {
+                await _drive.AuthorizeWithBrowserAsync(_state, progress);
+                await SaveStateAsync();
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        var existing = _libraries.FirstOrDefault(library => string.Equals(library.TreeUri, GoogleDriveLibraryService.BuildFolderUri(folderId), StringComparison.Ordinal));
+        await IndexGoogleDriveApiLibraryAsync(existing);
+    }
     private async Task RefreshActiveLibraryAsync()
     {
         if (_activeLibrary is null)
         {
-            await AddLibraryAsync();
+            await AddGoogleDriveApiLibraryAsync();
+            return;
+        }
+
+        if (_activeLibrary.SourceKind == EagleLibrarySourceKind.GoogleDriveApi
+            || GoogleDriveLibraryService.IsDriveFolderUri(_activeLibrary.TreeUri))
+        {
+            await IndexGoogleDriveApiLibraryAsync(_activeLibrary);
             return;
         }
 
         await IndexLibraryAsync(_activeLibrary.TreeUri, _activeLibrary);
     }
 
+    private async Task IndexGoogleDriveApiLibraryAsync(EagleLibrary? previous)
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        var progress = new Progress<string>(message => _summaryLabel.Text = message);
+        SetBusy(true, "Drive API索引作成中...");
+        try
+        {
+            var library = await _drive.IndexAsync(_state, previous, progress);
+            var existingIndex = _libraries.FindIndex(item =>
+                string.Equals(item.Id, library.Id, StringComparison.Ordinal)
+                || string.Equals(item.TreeUri, library.TreeUri, StringComparison.Ordinal));
+            if (existingIndex >= 0)
+            {
+                _libraries[existingIndex] = library;
+            }
+            else
+            {
+                _libraries.Insert(0, library);
+            }
+
+            _activeLibrary = library;
+            _state.ActiveLibraryId = library.Id;
+            _state.SelectedFolderId = AllFoldersId;
+            _state.SelectedTags.Clear();
+            _state.SelectedTag = null;
+            await SaveStateAsync();
+            RefreshVisibleAssets();
+            if (library.Assets.Count == 0)
+            {
+                await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
+            }
+        }
+        catch (GoogleDriveReconnectRequiredException ex)
+        {
+            var reconnect = await DisplayAlertAsync("Google Drive再接続", ex.Message, "接続", "キャンセル");
+            if (reconnect)
+            {
+                await _drive.AuthorizeWithBrowserAsync(_state, progress);
+                await SaveStateAsync();
+                SetBusy(false);
+                await IndexGoogleDriveApiLibraryAsync(previous);
+            }
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("Drive APIで索引化できません", ex.Message, "OK");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
     private async Task IndexLibraryAsync(string treeUri, EagleLibrary? previous)
     {
         if (_isBusy)
@@ -293,7 +426,7 @@ public sealed class BookshelfPage : ContentPage
     {
         var labels = _libraries
             .Select((library, index) => $"{index + 1}. [{library.SourceLabel}] {library.Name}")
-            .Concat(["Google Driveフォルダ追加", "端末/同期フォルダ追加"])
+            .Concat(["Google Drive APIフォルダ追加", "Google Drive Providerフォルダ追加", "端末/同期フォルダ追加"])
             .ToArray();
         var selected = await DisplayActionSheetAsync("ライブラリ", "キャンセル", null, labels);
         if (string.IsNullOrWhiteSpace(selected) || selected == "キャンセル")
@@ -301,12 +434,17 @@ public sealed class BookshelfPage : ContentPage
             return;
         }
 
-        if (selected == "Google Driveフォルダ追加")
+        if (selected == "Google Drive APIフォルダ追加")
+        {
+            await AddGoogleDriveApiLibraryAsync();
+            return;
+        }
+
+        if (selected == "Google Drive Providerフォルダ追加")
         {
             await AddLibraryAsync(preferGoogleDrive: true);
             return;
         }
-
         if (selected == "端末/同期フォルダ追加")
         {
             await AddLibraryAsync();
@@ -576,7 +714,7 @@ public sealed class BookshelfPage : ContentPage
 
         if (asset.MediaKind == EagleAssetMediaKind.Audio)
         {
-            await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index));
+            await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index, _imageSources));
             return;
         }
 

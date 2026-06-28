@@ -9,6 +9,7 @@ public sealed class AudioPlayerPage : ContentPage
 {
     private readonly IReadOnlyList<EagleAsset> _assets;
     private int _index;
+    private readonly EagleImageSourceService _mediaSources;
     private MediaPlayer? _player;
     private bool _isPrepared;
     private bool _isSeeking;
@@ -51,8 +52,9 @@ public sealed class AudioPlayerPage : ContentPage
     private readonly Button _previousButton = CreateControlButton("前", width: 64);
     private readonly Button _nextButton = CreateControlButton("次", width: 64);
 
-    public AudioPlayerPage(IReadOnlyList<EagleAsset> assets, int startIndex)
+    public AudioPlayerPage(IReadOnlyList<EagleAsset> assets, int startIndex, EagleImageSourceService mediaSources)
     {
+        _mediaSources = mediaSources;
         _assets = assets.Where(asset => asset.MediaKind == EagleAssetMediaKind.Audio).ToList();
         var startAsset = assets.ElementAtOrDefault(startIndex);
         _index = startAsset is null ? 0 : Math.Max(0, _assets.ToList().FindIndex(asset => asset.Id == startAsset.Id));
@@ -188,7 +190,10 @@ public sealed class AudioPlayerPage : ContentPage
         try
         {
             var activity = MainActivity.Current ?? throw new InvalidOperationException("Android activity is not ready.");
-            var uri = AndroidUri.Parse(uriString) ?? throw new InvalidOperationException("URIを読み取れませんでした。");
+            var playbackPath = await _mediaSources.GetPlaybackPathAsync(asset);
+            var uri = GoogleDriveLibraryService.IsDriveFileUri(uriString)
+                ? null
+                : AndroidUri.Parse(playbackPath) ?? throw new InvalidOperationException("URIを読み取れませんでした。");
             _player = new MediaPlayer();
             _player.Prepared += (_, _) =>
             {
@@ -211,7 +216,14 @@ public sealed class AudioPlayerPage : ContentPage
                 });
             };
             _player.Completion += (_, _) => MainThread.BeginInvokeOnMainThread(async () => await MoveAsync(1));
-            _player.SetDataSource(activity, uri);
+            if (uri is null)
+            {
+                _player.SetDataSource(playbackPath);
+            }
+            else
+            {
+                _player.SetDataSource(activity, uri);
+            }
             _player.PrepareAsync();
         }
         catch (Exception ex)

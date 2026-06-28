@@ -5,10 +5,12 @@ namespace CoffeeEagle.Reader.Services;
 public sealed class EagleImageSourceService
 {
     private readonly AndroidDocumentTreeService _documents;
+    private readonly GoogleDriveLibraryService _drive;
 
-    public EagleImageSourceService(AndroidDocumentTreeService documents)
+    public EagleImageSourceService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive)
     {
         _documents = documents;
+        _drive = drive;
     }
 
     public ImageSource? CreateThumbnailSource(EagleAsset asset)
@@ -19,7 +21,7 @@ public sealed class EagleImageSourceService
         return CreateContentSource(uri);
     }
 
-    public Task OpenExternalAsync(EagleAsset asset)
+    public async Task<string> GetPlaybackPathAsync(EagleAsset asset, CancellationToken cancellationToken = default)
     {
         var uri = asset.FileUri ?? asset.ThumbnailUri;
         if (string.IsNullOrWhiteSpace(uri))
@@ -27,8 +29,29 @@ public sealed class EagleImageSourceService
             throw new InvalidOperationException("開けるファイルがありません。");
         }
 
+        if (GoogleDriveLibraryService.IsDriveFileUri(uri))
+        {
+            return await _drive.GetCachedFilePathAsync(uri, cancellationToken);
+        }
+
+        return uri;
+    }
+
+    public async Task OpenExternalAsync(EagleAsset asset)
+    {
+        var uri = asset.FileUri ?? asset.ThumbnailUri;
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            throw new InvalidOperationException("開けるファイルがありません。");
+        }
+
+        if (GoogleDriveLibraryService.IsDriveFileUri(uri))
+        {
+            throw new InvalidOperationException("Drive API由来ファイルの外部アプリ連携はまだ未対応です。音声はアプリ内プレイヤーで再生できます。");
+        }
+
         _documents.OpenExternal(uri, ResolveMimeType(asset));
-        return Task.CompletedTask;
+        await Task.CompletedTask;
     }
 
     public ImageSource? CreateFullSource(EagleAsset asset)
@@ -58,7 +81,9 @@ public sealed class EagleImageSourceService
         {
             try
             {
-                return _documents.OpenRead(uri);
+                return GoogleDriveLibraryService.IsDriveFileUri(uri)
+                    ? _drive.OpenRead(uri)
+                    : _documents.OpenRead(uri);
             }
             catch
             {

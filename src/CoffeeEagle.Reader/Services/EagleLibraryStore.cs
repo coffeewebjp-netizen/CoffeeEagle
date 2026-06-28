@@ -60,6 +60,11 @@ public sealed class EagleLibraryStore
         state.GridSpan = Math.Clamp(state.GridSpan <= 0 ? 3 : state.GridSpan, 2, 5);
         state.SearchText ??= string.Empty;
         state.SelectedTags ??= [];
+        if (string.IsNullOrWhiteSpace(state.GoogleDriveClientId))
+        {
+            state.GoogleDriveClientId = GoogleDriveLibraryService.DefaultClientId;
+        }
+
         if (!string.IsNullOrWhiteSpace(state.SelectedTag)
             && !state.SelectedTags.Contains(state.SelectedTag, StringComparer.CurrentCultureIgnoreCase))
         {
@@ -77,7 +82,12 @@ public sealed class EagleLibraryStore
 
             if (string.IsNullOrWhiteSpace(library.SourceLabel))
             {
-                library.SourceLabel = library.SourceKind == EagleLibrarySourceKind.GoogleDrive ? "Google Drive" : "端末フォルダ";
+                library.SourceLabel = library.SourceKind switch
+                {
+                    EagleLibrarySourceKind.GoogleDriveApi => "Google Drive API",
+                    EagleLibrarySourceKind.GoogleDrive => "Google Drive",
+                    _ => "端末フォルダ"
+                };
             }
 
             library.IndexMessage ??= string.Empty;

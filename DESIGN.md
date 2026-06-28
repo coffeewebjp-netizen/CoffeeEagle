@@ -50,6 +50,8 @@ Android側は次の情報を索引として保存する。
 
 更新時はルートの `mtime.json` があれば先に読み、Drive Providerの再帰列挙で見えた `images/*.info` と照合する。`mtime.json` に存在するのに列挙されないIDは、`images/<asset-id>.info` として直接Document URI候補を問い合わせ、取れる場合は索引へ回収する。`mtime` では差分検知と直接参照の試行まではできるが、Google Drive Providerが一覧も直接参照も古い場合はファイル本体を発見できない。その場合はDrive API方式へ切り替える。
 
+Drive API経路では、指定されたEAGLE `.library` フォルダIDからDrive REST APIで `metadata.json`、`mtime.json`、`images/*.info` を直接列挙する。画像や音声本体は索引作成時にはダウンロードせず、表示・再生時だけ端末キャッシュへ取得する。
+
 ## 機能スコープ
 
 初期スコープ:

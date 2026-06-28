@@ -20,6 +20,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<AndroidDocumentTreeService>();
         builder.Services.AddSingleton<EagleLibraryIndexer>();
         builder.Services.AddSingleton<EagleLibraryStore>();
+        builder.Services.AddSingleton<GoogleDriveLibraryService>();
         builder.Services.AddSingleton<EagleImageSourceService>();
         builder.Services.AddTransient<BookshelfPage>();
 
@@ -30,4 +31,3 @@ public static class MauiProgram
         return builder.Build();
     }
 }
-

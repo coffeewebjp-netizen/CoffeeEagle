@@ -61,6 +61,7 @@ public sealed class BookshelfPage : ContentPage
     private EagleLibrary? _activeLibrary;
     private bool _loaded;
     private bool _isBusy;
+    private Action? _activeSheetCancel;
 
     public BookshelfPage(
         EagleLibraryStore store,
@@ -116,6 +117,17 @@ public sealed class BookshelfPage : ContentPage
 
         _loaded = true;
         await LoadStateAsync();
+    }
+
+    protected override bool OnBackButtonPressed()
+    {
+        if (_activeSheetCancel is not null)
+        {
+            _activeSheetCancel.Invoke();
+            return true;
+        }
+
+        return base.OnBackButtonPressed();
     }
 
     private View CreateLayout()
@@ -540,26 +552,46 @@ public sealed class BookshelfPage : ContentPage
         RefreshVisibleAssets();
     }
 
-    private async Task<List<string>?> ShowTagPopupAsync(
+    private Task<List<string>?> ShowTagPopupAsync(
         IReadOnlyList<TagCount> tagCounts,
         IEnumerable<string> selectedTags,
         int assetCount)
     {
+        var popup = new TagPopupView(tagCounts, selectedTags, assetCount);
+        return ShowBottomSheetAsync(popup, popup.Completion, popup.Cancel);
+    }
+
+    private Task<PickerOption?> ShowOptionPickerAsync(
+        string title,
+        string subtitle,
+        IReadOnlyList<PickerOption> options,
+        string searchPlaceholder)
+    {
+        var popup = new OptionPickerView(title, subtitle, options, searchPlaceholder);
+        return ShowBottomSheetAsync(popup, popup.Completion, popup.Cancel);
+    }
+
+    private async Task<TResult?> ShowBottomSheetAsync<TResult>(
+        View popup,
+        Task<TResult?> completion,
+        Action cancel)
+    {
         if (Content is not Grid root)
         {
-            return null;
+            return default;
         }
 
-        var popup = new TagPopupView(tagCounts, selectedTags, assetCount);
+        var previousCancel = _activeSheetCancel;
+        _activeSheetCancel = cancel;
         var dimmer = new BoxView
         {
-            Color = Color.FromArgb("#99000000"),
+            Color = Color.FromArgb("#48000000"),
             InputTransparent = false
         };
         var panel = new Border
         {
-            BackgroundColor = Color.FromArgb("#0B0E12"),
-            Stroke = Color.FromArgb("#23303C"),
+            BackgroundColor = Color.FromArgb("#F00B0E12"),
+            Stroke = Color.FromArgb("#334150"),
             StrokeThickness = 1,
             StrokeShape = new RoundRectangle { CornerRadius = 12 },
             Content = popup,
@@ -570,25 +602,40 @@ public sealed class BookshelfPage : ContentPage
         var overlay = new Grid
         {
             Opacity = 0,
+            InputTransparent = false,
             Children = { dimmer, panel }
         };
         Grid.SetRowSpan(overlay, Math.Max(1, root.RowDefinitions.Count));
+        overlay.ZIndex = 1000;
 
         var dimmerTap = new TapGestureRecognizer();
-        dimmerTap.Tapped += (_, _) => popup.Cancel();
+        dimmerTap.Tapped += (_, _) => cancel();
         dimmer.GestureRecognizers.Add(dimmerTap);
 
+        TResult? result = default;
         root.Children.Add(overlay);
         panel.TranslationY = 32;
-        await Task.WhenAll(
-            overlay.FadeToAsync(1, 140, Easing.CubicOut),
-            panel.TranslateToAsync(0, 0, 180, Easing.CubicOut));
+        try
+        {
+            await Task.WhenAll(
+                overlay.FadeToAsync(1, 140, Easing.CubicOut),
+                panel.TranslateToAsync(0, 0, 180, Easing.CubicOut));
 
-        var result = await popup.Completion;
-        await Task.WhenAll(
-            overlay.FadeToAsync(0, 120, Easing.CubicIn),
-            panel.TranslateToAsync(0, 32, 120, Easing.CubicIn));
-        root.Children.Remove(overlay);
+            result = await completion;
+
+            await Task.WhenAll(
+                overlay.FadeToAsync(0, 120, Easing.CubicIn),
+                panel.TranslateToAsync(0, 32, 120, Easing.CubicIn));
+        }
+        finally
+        {
+            root.Children.Remove(overlay);
+            if (ReferenceEquals(_activeSheetCancel, cancel))
+            {
+                _activeSheetCancel = previousCancel;
+            }
+        }
+
         return result;
     }
 
@@ -597,16 +644,7 @@ public sealed class BookshelfPage : ContentPage
         return string.Equals(_state.SelectedFolderId ?? AllFoldersId, folderId, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<PickerOption?> ShowOptionPickerAsync(
-        string title,
-        string subtitle,
-        IReadOnlyList<PickerOption> options,
-        string searchPlaceholder)
-    {
-        var page = new OptionPickerPage(title, subtitle, options, searchPlaceholder);
-        await Navigation.PushModalAsync(new NavigationPage(page));
-        return await page.Completion;
-    }
+
     private async Task CycleDensityAsync()
     {
         _state.GridSpan = _state.GridSpan >= 5 ? 2 : _state.GridSpan + 1;
@@ -1028,7 +1066,7 @@ public sealed class BookshelfPage : ContentPage
 
     private sealed record TagCount(string Name, int Count);
 
-    private sealed class OptionPickerPage : ContentPage
+    private sealed class OptionPickerView : ContentView
     {
         private readonly TaskCompletionSource<PickerOption?> _completion = new();
         private readonly IReadOnlyList<PickerOption> _options;
@@ -1037,13 +1075,11 @@ public sealed class BookshelfPage : ContentPage
 
         public Task<PickerOption?> Completion => _completion.Task;
 
-        public OptionPickerPage(string title, string subtitle, IReadOnlyList<PickerOption> options, string searchPlaceholder)
+        public OptionPickerView(string title, string subtitle, IReadOnlyList<PickerOption> options, string searchPlaceholder)
         {
             _options = options;
             _emptyText = title + "がありません";
-            Title = title;
-            BackgroundColor = Color.FromArgb("#0B0E12");
-            NavigationPage.SetHasNavigationBar(this, false);
+            BackgroundColor = Color.FromArgb("#F00B0E12");
 
             var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
             closeButton.Clicked += (_, _) => Complete(null);
@@ -1098,12 +1134,6 @@ public sealed class BookshelfPage : ContentPage
             Grid.SetRow(scroll, 2);
             Content = root;
             Render(string.Empty);
-        }
-
-        protected override bool OnBackButtonPressed()
-        {
-            Complete(null);
-            return true;
         }
 
         private void Render(string filter)
@@ -1200,14 +1230,14 @@ public sealed class BookshelfPage : ContentPage
             return border;
         }
 
-        private async void Complete(PickerOption? selected)
+        public void Cancel()
         {
-            if (!_completion.TrySetResult(selected))
-            {
-                return;
-            }
+            Complete(null);
+        }
 
-            await Navigation.PopModalAsync();
+        private void Complete(PickerOption? selected)
+        {
+            _completion.TrySetResult(selected);
         }
     }
 
@@ -1230,7 +1260,7 @@ public sealed class BookshelfPage : ContentPage
         {
             _tags = tags;
             _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
-            BackgroundColor = Color.FromArgb("#0B0E12");
+            BackgroundColor = Color.FromArgb("#F00B0E12");
 
             var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
             closeButton.Clicked += (_, _) => Complete(null);
@@ -1282,7 +1312,7 @@ public sealed class BookshelfPage : ContentPage
             var footer = new Grid
             {
                 Padding = new Thickness(14, 10),
-                BackgroundColor = Color.FromArgb("#E00B0E12"),
+                BackgroundColor = Color.FromArgb("#D80B0E12"),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Star),

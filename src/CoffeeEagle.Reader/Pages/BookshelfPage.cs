@@ -621,7 +621,10 @@ public sealed class BookshelfPage : ContentPage
 
     private string CreateSummaryText(EagleLibrary library)
     {
-        var summary = $"{library.SourceLabel}  {_visibleAssets.Count:N0} / {library.Assets.Count:N0} items  Indexed {library.IndexedAt:yyyy-MM-dd HH:mm}";
+        var imageCount = library.Assets.Count(asset => asset.MediaKind == EagleAssetMediaKind.Image);
+        var audioCount = library.Assets.Count(asset => asset.MediaKind == EagleAssetMediaKind.Audio);
+        var videoCount = library.Assets.Count(asset => asset.MediaKind == EagleAssetMediaKind.Video);
+        var summary = $"{library.SourceLabel}  {_visibleAssets.Count:N0} / {library.Assets.Count:N0} items  IMAGE {imageCount:N0} AUDIO {audioCount:N0} VIDEO {videoCount:N0}  Indexed {library.IndexedAt:yyyy-MM-dd HH:mm}";
         return library.Assets.Count == 0 && !string.IsNullOrWhiteSpace(library.IndexMessage)
             ? summary + "  " + library.IndexMessage
             : summary;
@@ -969,3 +972,4 @@ public sealed class BookshelfPage : ContentPage
         };
     }
 }
+

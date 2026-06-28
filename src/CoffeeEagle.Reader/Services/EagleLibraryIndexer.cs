@@ -13,12 +13,12 @@ public sealed class EagleLibraryIndexer
 
     private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".aiff", ".aif"
+        ".mp3", ".wav", ".flac", ".m4a", ".m4b", ".aac", ".ogg", ".oga", ".opus", ".wma", ".aiff", ".aif", ".alac", ".ape", ".amr", ".mid", ".midi"
     };
 
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".3gp"
+        ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".3gp", ".ts", ".mts", ".m2ts", ".flv", ".ogv"
     };
 
     private readonly AndroidDocumentTreeService _documents;
@@ -175,13 +175,13 @@ public sealed class EagleLibraryIndexer
             await using var stream = _documents.OpenRead(metadataEntry.Uri);
             using var metadata = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
             var root = metadata.RootElement;
-            var files = children.Where(child => !child.IsDirectory).ToList();
+            var files = children.Where(child => !child.IsDirectory && !IsMetadataFile(child)).ToList();
             var imageFiles = files.Where(IsImageFile).ToList();
             var mediaFiles = files.Where(IsSupportedMediaFile).ToList();
             scan.ImageFiles += imageFiles.Count;
             scan.MediaFiles += mediaFiles.Count;
             var thumbnail = SelectThumbnail(imageFiles);
-            var primaryFile = SelectPrimaryMedia(mediaFiles, thumbnail);
+            var primaryFile = SelectPrimaryMedia(files, mediaFiles, thumbnail, root);
             var mediaKind = ResolveMediaKind(primaryFile, root);
             var id = ReadString(root, "id", "uuid") ?? TrimInfoSuffix(infoDirectory.Name);
             var fileName = ReadString(root, "fileName", "filename")
@@ -253,14 +253,49 @@ public sealed class EagleLibraryIndexer
             .FirstOrDefault();
     }
 
-    private static DocumentEntry? SelectPrimaryMedia(IReadOnlyList<DocumentEntry> files, DocumentEntry? thumbnail)
+    private static DocumentEntry? SelectPrimaryMedia(
+        IReadOnlyList<DocumentEntry> allFiles,
+        IReadOnlyList<DocumentEntry> supportedFiles,
+        DocumentEntry? thumbnail,
+        JsonElement metadata)
     {
-        return files
+        var candidates = supportedFiles
             .Where(file => thumbnail is null || !string.Equals(file.DocumentId, thumbnail.DocumentId, StringComparison.Ordinal))
-            .OrderBy(file => IsImageFile(file) && IsLikelyThumbnail(file) ? 1 : 0)
-            .ThenByDescending(file => file.Size)
-            .FirstOrDefault()
-            ?? thumbnail;
+            .ToList();
+        if (candidates.Count > 0)
+        {
+            return candidates
+                .OrderBy(file => IsImageFile(file) && IsLikelyThumbnail(file) ? 1 : 0)
+                .ThenByDescending(file => file.Size)
+                .First();
+        }
+
+        var metadataFileName = ReadString(metadata, "fileName", "filename");
+        var metadataExtension = NormalizeExtension(ReadString(metadata, "ext", "extension") ?? Path.GetExtension(metadataFileName ?? string.Empty));
+        var fallback = allFiles
+            .Where(file => thumbnail is null || !string.Equals(file.DocumentId, thumbnail.DocumentId, StringComparison.Ordinal))
+            .Where(file => !IsLikelyThumbnail(file))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(metadataFileName))
+        {
+            var byName = fallback.FirstOrDefault(file => string.Equals(file.Name, metadataFileName, StringComparison.OrdinalIgnoreCase));
+            if (byName is not null)
+            {
+                return byName;
+            }
+        }
+
+        if (IsKnownMediaExtension(metadataExtension))
+        {
+            return fallback
+                .OrderBy(file => IsImageFile(file) ? 1 : 0)
+                .ThenByDescending(file => file.Size)
+                .FirstOrDefault()
+                ?? thumbnail;
+        }
+
+        return thumbnail;
     }
 
     private static bool IsMetadataFile(DocumentEntry entry)
@@ -308,6 +343,14 @@ public sealed class EagleLibraryIndexer
         return entry.Name.Contains("thumb", StringComparison.OrdinalIgnoreCase)
             || entry.Name.Contains("thumbnail", StringComparison.OrdinalIgnoreCase)
             || entry.Name.StartsWith("cover", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsKnownMediaExtension(string? extension)
+    {
+        return !string.IsNullOrWhiteSpace(extension)
+            && (ImageExtensions.Contains(extension)
+                || AudioExtensions.Contains(extension)
+                || VideoExtensions.Contains(extension));
     }
 
     private static string ResolveMediaKind(DocumentEntry? primaryFile, JsonElement metadata)
@@ -625,3 +668,4 @@ public sealed class EagleLibraryIndexer
         return normalized.StartsWith('.') ? normalized : "." + normalized;
     }
 }
+

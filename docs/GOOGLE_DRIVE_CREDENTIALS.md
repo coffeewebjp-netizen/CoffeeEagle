@@ -8,6 +8,7 @@ Google Drive Provider で `.library` フォルダの再帰読み取りが安定�
 
 - Android package name: `net.coffeewebjp.coffeeeagle.reader`
 - Release署名 SHA-1: `15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9`
+- Android OAuth client ID: `327808944898-qr1qd5imhe3ddp56feng1kmpkpqnq10c.apps.googleusercontent.com`
 - 署名鍵: `.tools/android-signing/coffeeeagle-reader-release.jks`
 - 署名 props: `.tools/android-signing/CoffeeEagle.Reader.Signing.props`
 
@@ -24,6 +25,12 @@ Google Drive Provider で `.library` フォルダの再帰読み取りが安定�
 7. Package name に `net.coffeewebjp.coffeeeagle.reader` を入れる。
 8. SHA-1 certificate fingerprint に `15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9` を入れる。
 9. 発行された Android OAuth client ID をアプリ設定へ追加する。
+
+登録済み client ID:
+
+```text
+327808944898-qr1qd5imhe3ddp56feng1kmpkpqnq10c.apps.googleusercontent.com
+```
 
 ## Scope 方針
 

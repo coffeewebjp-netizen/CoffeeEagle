@@ -710,7 +710,7 @@ public sealed class BookshelfPage : ContentPage
         {
             var imageAssets = _visibleAssets.Where(item => item.MediaKind == EagleAssetMediaKind.Image).ToList();
             var imageIndex = imageAssets.FindIndex(item => string.Equals(item.Id, asset.Id, StringComparison.Ordinal));
-            await Navigation.PushAsync(new ViewerPage(imageAssets, Math.Max(0, imageIndex), _imageSources));
+            await Navigation.PushAsync(new ViewerPage(imageAssets, Math.Max(0, imageIndex), _imageSources, _store));
             return;
         }
 

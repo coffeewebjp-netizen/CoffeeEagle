@@ -58,6 +58,7 @@ public sealed class EagleLibraryStore
     private static EagleReaderState Normalize(EagleReaderState state)
     {
         state.GridSpan = Math.Clamp(state.GridSpan <= 0 ? 3 : state.GridSpan, 2, 5);
+        state.ImageAutoAdvanceSeconds = Math.Clamp(state.ImageAutoAdvanceSeconds <= 0 ? 5 : state.ImageAutoAdvanceSeconds, 1, 600);
         state.SearchText ??= string.Empty;
         state.SelectedTags ??= [];
         if (string.IsNullOrWhiteSpace(state.GoogleDriveClientId))

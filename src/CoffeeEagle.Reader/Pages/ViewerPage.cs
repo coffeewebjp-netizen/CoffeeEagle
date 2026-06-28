@@ -8,13 +8,13 @@ public sealed class ViewerPage : ContentPage
     private readonly IReadOnlyList<EagleAsset> _assets;
     private readonly EagleImageSourceService _imageSources;
     private readonly EagleLibraryStore _store;
-    private readonly Image _image = new()
-    {
-        Aspect = Aspect.AspectFit,
-        BackgroundColor = Colors.Black,
-        HorizontalOptions = LayoutOptions.Fill,
-        VerticalOptions = LayoutOptions.Fill
-    };
+    private const uint PageTurnDuration = 170;
+    private const int PageTransitionPrepareMilliseconds = 24;
+    private const int AdjacentPreloadRadius = 2;
+
+    private readonly Image _frontImage = CreateViewerImage();
+    private readonly Image _backImage = CreateViewerImage();
+    private readonly Grid _imageDeck;
     private readonly Grid _chrome = new()
     {
         BackgroundColor = Colors.Transparent,
@@ -51,6 +51,9 @@ public sealed class ViewerPage : ContentPage
     private int _autoAdvanceSeconds = 5;
     private int _autoTimerVersion;
     private bool _isAnimating;
+    private Image _activeImage = null!;
+    private Image _bufferImage = null!;
+    private CancellationTokenSource? _preloadCancellation;
 
     public ViewerPage(IReadOnlyList<EagleAsset> assets, int startIndex, EagleImageSourceService imageSources, EagleLibraryStore store)
     {
@@ -61,6 +64,16 @@ public sealed class ViewerPage : ContentPage
 
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
+        _activeImage = _frontImage;
+        _bufferImage = _backImage;
+        _bufferImage.IsVisible = false;
+        _imageDeck = new Grid
+        {
+            BackgroundColor = Colors.Black,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill,
+            Children = { _frontImage, _backImage }
+        };
         Content = CreateLayout();
         AddGestures();
         ShowAsset();
@@ -80,6 +93,8 @@ public sealed class ViewerPage : ContentPage
     {
         base.OnDisappearing();
         _autoTimerVersion++;
+        _preloadCancellation?.Cancel();
+        _preloadCancellation = null;
     }
 
     private View CreateLayout()
@@ -140,7 +155,7 @@ public sealed class ViewerPage : ContentPage
 
         return new Grid
         {
-            Children = { _image, _chrome }
+            Children = { _imageDeck, _chrome }
         };
     }
 
@@ -148,14 +163,17 @@ public sealed class ViewerPage : ContentPage
     {
         if (Content is View root)
         {
-            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, 1));
-            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, -1));
-            root.GestureRecognizers.Add(CreateTapGesture());
+            AddViewerGestures(root);
         }
 
-        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, 1));
-        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, -1));
-        _image.GestureRecognizers.Add(CreateTapGesture());
+        AddViewerGestures(_imageDeck);
+    }
+
+    private void AddViewerGestures(View view)
+    {
+        view.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, 1));
+        view.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, -1));
+        view.GestureRecognizers.Add(CreateTapGesture());
     }
 
     private SwipeGestureRecognizer CreateSwipeGesture(SwipeDirection direction, int delta)
@@ -207,27 +225,41 @@ public sealed class ViewerPage : ContentPage
     private async Task ShowAssetAsync(int nextIndex, int direction)
     {
         _isAnimating = true;
-        var width = Width > 0 ? Width : 360;
-        var offset = Math.Min(width * 0.28, 150);
+        _preloadCancellation?.Cancel();
+        var outgoing = _activeImage;
+        var incoming = _bufferImage;
+        var slideDistance = GetSlideDistance();
+
         try
         {
+            incoming.Source = await CreatePreparedFullSourceAsync(_assets[nextIndex]);
+            incoming.IsVisible = true;
+            incoming.Opacity = 1;
+            incoming.TranslationX = direction * slideDistance;
+            outgoing.IsVisible = true;
+            outgoing.Opacity = 1;
+            outgoing.TranslationX = 0;
+
+            await Task.Delay(PageTransitionPrepareMilliseconds);
             await Task.WhenAll(
-                _image.TranslateToAsync(-direction * offset, 0, 120, Easing.CubicIn),
-                _image.FadeToAsync(0.18, 120, Easing.CubicIn));
+                outgoing.TranslateToAsync(-direction * slideDistance, 0, PageTurnDuration, Easing.CubicOut),
+                incoming.TranslateToAsync(0, 0, PageTurnDuration, Easing.CubicOut));
 
             _index = nextIndex;
-            ShowAsset(resetVisualState: false);
-            _image.TranslationX = direction * offset;
-            _image.Opacity = 0.18;
-
-            await Task.WhenAll(
-                _image.TranslateToAsync(0, 0, 180, Easing.CubicOut),
-                _image.FadeToAsync(1, 180, Easing.CubicOut));
+            _activeImage = incoming;
+            _bufferImage = outgoing;
+            _bufferImage.IsVisible = false;
+            _bufferImage.Source = null;
+            UpdateAssetMetadata();
+            ScheduleAdjacentPreload();
         }
         finally
         {
-            _image.TranslationX = 0;
-            _image.Opacity = 1;
+            _activeImage.IsVisible = true;
+            _activeImage.Opacity = 1;
+            _activeImage.TranslationX = 0;
+            _bufferImage.Opacity = 1;
+            _bufferImage.TranslationX = 0;
             _isAnimating = false;
         }
     }
@@ -236,7 +268,8 @@ public sealed class ViewerPage : ContentPage
     {
         if (_assets.Count == 0)
         {
-            _image.Source = null;
+            _activeImage.Source = null;
+            _bufferImage.Source = null;
             _titleLabel.Text = string.Empty;
             _counterLabel.Text = "0 / 0";
             _tagLabel.Text = string.Empty;
@@ -244,15 +277,116 @@ public sealed class ViewerPage : ContentPage
         }
 
         var asset = _assets[_index];
-        _image.Source = _imageSources.CreateFullSource(asset);
-        _titleLabel.Text = asset.Name;
-        _counterLabel.Text = $"{_index + 1:N0} / {_assets.Count:N0}";
-        _tagLabel.Text = asset.Tags.Count == 0 ? string.Empty : string.Join("  ", asset.Tags);
+        _activeImage.Source = _imageSources.CreateFullSource(asset);
+        UpdateAssetMetadata();
 
         if (resetVisualState)
         {
-            _image.Opacity = 1;
-            _image.TranslationX = 0;
+            ResetImageLayer(_activeImage, visible: true, clearSource: false);
+            ResetImageLayer(_bufferImage, visible: false, clearSource: true);
+        }
+
+        ScheduleAdjacentPreload();
+    }
+
+    private void UpdateAssetMetadata()
+    {
+        if (_assets.Count == 0)
+        {
+            return;
+        }
+
+        var asset = _assets[_index];
+        _titleLabel.Text = asset.Name;
+        _counterLabel.Text = $"{_index + 1:N0} / {_assets.Count:N0}";
+        _tagLabel.Text = asset.Tags.Count == 0 ? string.Empty : string.Join("  ", asset.Tags);
+    }
+
+    private static void ResetImageLayer(Image image, bool visible, bool clearSource)
+    {
+        image.IsVisible = visible;
+        image.Opacity = 1;
+        image.TranslationX = 0;
+        if (clearSource)
+        {
+            image.Source = null;
+        }
+    }
+
+    private double GetSlideDistance()
+    {
+        var width = _imageDeck.Width > 0 ? _imageDeck.Width : Width;
+        return Math.Max(width > 0 ? width : 360, 1);
+    }
+
+    private async Task<ImageSource?> CreatePreparedFullSourceAsync(EagleAsset asset)
+    {
+        try
+        {
+            await _imageSources.PreloadAsync(asset);
+        }
+        catch
+        {
+            // Source creation below still handles normal fallback behavior.
+        }
+
+        return _imageSources.CreateFullSource(asset);
+    }
+
+    private void ScheduleAdjacentPreload()
+    {
+        _preloadCancellation?.Cancel();
+        var cancellation = new CancellationTokenSource();
+        _preloadCancellation = cancellation;
+
+        var assets = GetAdjacentPreloadAssets().ToArray();
+        if (assets.Length == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var asset in assets)
+            {
+                if (cancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                try
+                {
+                    await _imageSources.PreloadAsync(asset, cancellation.Token);
+                }
+                catch
+                {
+                    // Adjacent preloading is opportunistic.
+                }
+            }
+        }, cancellation.Token);
+    }
+
+    private IEnumerable<EagleAsset> GetAdjacentPreloadAssets()
+    {
+        if (_assets.Count <= 1)
+        {
+            yield break;
+        }
+
+        for (var offset = -AdjacentPreloadRadius; offset <= AdjacentPreloadRadius; offset++)
+        {
+            if (offset == 0)
+            {
+                continue;
+            }
+
+            var index = _index + offset;
+            if (index < 0 || index >= _assets.Count)
+            {
+                continue;
+            }
+
+            yield return _assets[index];
         }
     }
 
@@ -336,6 +470,17 @@ public sealed class ViewerPage : ContentPage
     {
         _chromeVisible = !_chromeVisible;
         _chrome.IsVisible = _chromeVisible;
+    }
+
+    private static Image CreateViewerImage()
+    {
+        return new Image
+        {
+            Aspect = Aspect.AspectFit,
+            BackgroundColor = Colors.Black,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill
+        };
     }
 
     private static Button CreateControlButton(string text, double width, double fontSize)

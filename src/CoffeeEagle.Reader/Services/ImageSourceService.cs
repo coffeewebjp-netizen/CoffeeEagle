@@ -37,6 +37,20 @@ public sealed class EagleImageSourceService
         return uri;
     }
 
+    public async Task PreloadAsync(EagleAsset asset, CancellationToken cancellationToken = default)
+    {
+        var uri = asset.FileUri ?? asset.ThumbnailUri;
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            return;
+        }
+
+        if (GoogleDriveLibraryService.IsDriveFileUri(uri))
+        {
+            await _drive.GetCachedFilePathAsync(uri, cancellationToken);
+        }
+    }
+
     public async Task OpenExternalAsync(EagleAsset asset)
     {
         var uri = asset.FileUri ?? asset.ThumbnailUri;

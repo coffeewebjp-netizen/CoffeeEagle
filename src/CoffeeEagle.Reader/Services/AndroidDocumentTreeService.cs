@@ -107,6 +107,28 @@ public sealed class AndroidDocumentTreeService
             ?? throw new InvalidOperationException("Document URIを作成できませんでした。");
     }
 
+    public DocumentEntry? TryGetDocument(string treeUriString, string documentId)
+    {
+        try
+        {
+            var treeUri = ParseUri(treeUriString);
+            var documentUri = DocumentsContract.BuildDocumentUriUsingTree(treeUri, documentId);
+            if (documentUri is null)
+            {
+                return null;
+            }
+
+            using var cursor = Resolver.Query(documentUri, DocumentProjection, null, null, null);
+            return cursor is not null && cursor.MoveToFirst()
+                ? ReadEntry(treeUri, cursor)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private DocumentEntry QuerySingle(AndroidUri treeUri, AndroidUri documentUri, string fallbackDocumentId, string fallbackName)
     {
         using var cursor = Resolver.Query(documentUri, DocumentProjection, null, null, null);

@@ -38,6 +38,8 @@ public sealed class EagleLibraryIndexer
         var root = _documents.GetRoot(treeUriString);
         var rootChildren = _documents.ListChildren(treeUriString, root.DocumentId);
         var rootMetadata = rootChildren.FirstOrDefault(IsMetadataFile);
+        var mtimeEntry = rootChildren.FirstOrDefault(child =>
+            !child.IsDirectory && string.Equals(child.Name, "mtime.json", StringComparison.OrdinalIgnoreCase));
         var imagesDirectory = rootChildren.FirstOrDefault(child =>
             child.IsDirectory && string.Equals(child.Name, "images", StringComparison.OrdinalIgnoreCase));
 
@@ -58,8 +60,9 @@ public sealed class EagleLibraryIndexer
         }
 
         NormalizeFolderPaths(folders);
+        var mtimeIndex = await ReadMtimeIndexAsync(mtimeEntry, cancellationToken);
         progress?.Report("メディア情報を索引化中...");
-        var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, progress, cancellationToken);
+        var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, mtimeIndex, progress, cancellationToken);
         var assets = scan.Assets;
         EnsureReferencedFolders(folders, assets);
         NormalizeFolderPaths(folders);
@@ -90,11 +93,19 @@ public sealed class EagleLibraryIndexer
     private async Task<AssetScanResult> ScanAssetsAsync(
         string treeUriString,
         DocumentEntry imagesDirectory,
+        MtimeIndex mtimeIndex,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var scan = new AssetScanResult();
+        var scan = new AssetScanResult
+        {
+            MtimeFound = mtimeIndex.Found,
+            MtimeReadFailed = mtimeIndex.ReadFailed,
+            MtimeAssetIds = mtimeIndex.AssetModifiedAt.Count,
+            MtimeDeclaredTotal = mtimeIndex.DeclaredTotal
+        };
         var assets = scan.Assets;
+        var seenInfoIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pendingDirectories = new Queue<DocumentEntry>();
         pendingDirectories.Enqueue(imagesDirectory);
 
@@ -125,6 +136,7 @@ public sealed class EagleLibraryIndexer
                 if (child.Name.EndsWith(".info", StringComparison.OrdinalIgnoreCase))
                 {
                     scan.InfoDirectories++;
+                    seenInfoIds.Add(TrimInfoSuffix(child.Name));
                     var asset = await TryReadAssetAsync(treeUriString, child, scan, cancellationToken);
                     if (asset is not null)
                     {
@@ -142,8 +154,98 @@ public sealed class EagleLibraryIndexer
             }
         }
 
+        await RecoverMissingMtimeAssetsAsync(
+            treeUriString,
+            imagesDirectory,
+            mtimeIndex,
+            seenInfoIds,
+            scan,
+            progress,
+            cancellationToken);
+
         progress?.Report(scan.ToMessage());
         return scan;
+    }
+
+    private async Task RecoverMissingMtimeAssetsAsync(
+        string treeUriString,
+        DocumentEntry imagesDirectory,
+        MtimeIndex mtimeIndex,
+        HashSet<string> seenInfoIds,
+        AssetScanResult scan,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (mtimeIndex.AssetModifiedAt.Count == 0)
+        {
+            return;
+        }
+
+        var missingIds = mtimeIndex.AssetModifiedAt.Keys
+            .Where(id => !seenInfoIds.Contains(id))
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        scan.MtimeMissingIds = missingIds.Count;
+        if (missingIds.Count == 0)
+        {
+            return;
+        }
+
+        progress?.Report($"mtime差分を確認中... missing {missingIds.Count}");
+        foreach (var assetId in missingIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var infoDirectory = FindInfoDirectoryById(treeUriString, imagesDirectory.DocumentId, assetId);
+            if (infoDirectory is null)
+            {
+                scan.MtimeDirectFailures++;
+                continue;
+            }
+
+            scan.MtimeDirectHits++;
+            scan.InfoDirectories++;
+            seenInfoIds.Add(assetId);
+            var asset = await TryReadAssetAsync(treeUriString, infoDirectory, scan, cancellationToken);
+            if (asset is not null)
+            {
+                scan.Assets.Add(asset);
+                scan.MtimeRecoveredIds++;
+            }
+        }
+    }
+
+    private DocumentEntry? FindInfoDirectoryById(string treeUriString, string imagesDocumentId, string assetId)
+    {
+        foreach (var documentId in BuildInfoDirectoryDocumentIdCandidates(imagesDocumentId, assetId))
+        {
+            var entry = _documents.TryGetDocument(treeUriString, documentId);
+            if (entry is not null && entry.IsDirectory)
+            {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> BuildInfoDirectoryDocumentIdCandidates(string parentDocumentId, string assetId)
+    {
+        var infoName = assetId.EndsWith(".info", StringComparison.OrdinalIgnoreCase)
+            ? assetId
+            : assetId + ".info";
+        if (parentDocumentId.EndsWith('/') || parentDocumentId.EndsWith(':'))
+        {
+            yield return parentDocumentId + infoName;
+        }
+        else
+        {
+            yield return parentDocumentId + "/" + infoName;
+        }
+
+        if (!parentDocumentId.EndsWith(':'))
+        {
+            yield return parentDocumentId + ":" + infoName;
+        }
     }
 
     private async Task<EagleAsset?> TryReadAssetAsync(
@@ -226,6 +328,47 @@ public sealed class EagleLibraryIndexer
         }
     }
 
+    private async Task<MtimeIndex> ReadMtimeIndexAsync(DocumentEntry? entry, CancellationToken cancellationToken)
+    {
+        if (entry is null)
+        {
+            return MtimeIndex.Empty;
+        }
+
+        try
+        {
+            var assets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            var declaredTotal = 0;
+            await using var stream = _documents.OpenRead(entry.Uri);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new MtimeIndex(true, true, assets, 0);
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "all", StringComparison.OrdinalIgnoreCase))
+                {
+                    declaredTotal = (int)ReadLongValue(property.Value);
+                    continue;
+                }
+
+                var mtime = ReadLongValue(property.Value);
+                if (!string.IsNullOrWhiteSpace(property.Name) && mtime > 0)
+                {
+                    assets[property.Name] = mtime;
+                }
+            }
+
+            return new MtimeIndex(true, false, assets, declaredTotal);
+        }
+        catch
+        {
+            return new MtimeIndex(true, true, new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase), 0);
+        }
+    }
+
     private sealed class AssetScanResult
     {
         public List<EagleAsset> Assets { get; } = [];
@@ -237,11 +380,36 @@ public sealed class EagleLibraryIndexer
         public int ImageFiles { get; set; }
         public int MediaFiles { get; set; }
         public int AssetReadFailures { get; set; }
+        public bool MtimeFound { get; set; }
+        public bool MtimeReadFailed { get; set; }
+        public int MtimeAssetIds { get; set; }
+        public int MtimeDeclaredTotal { get; set; }
+        public int MtimeMissingIds { get; set; }
+        public int MtimeDirectHits { get; set; }
+        public int MtimeDirectFailures { get; set; }
+        public int MtimeRecoveredIds { get; set; }
 
         public string ToMessage()
         {
-            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}";
+            var mtimeMessage = MtimeFound
+                ? $", mtime {(MtimeDeclaredTotal > 0 ? MtimeDeclaredTotal : MtimeAssetIds)}, missing {MtimeMissingIds}, recovered {MtimeRecoveredIds}, direct-hit {MtimeDirectHits}, direct-fail {MtimeDirectFailures}"
+                : ", mtime none";
+            if (MtimeReadFailed)
+            {
+                mtimeMessage += ", mtime-read-fail";
+            }
+
+            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}{mtimeMessage}";
         }
+    }
+
+    private sealed record MtimeIndex(
+        bool Found,
+        bool ReadFailed,
+        IReadOnlyDictionary<string, long> AssetModifiedAt,
+        int DeclaredTotal)
+    {
+        public static MtimeIndex Empty { get; } = new(false, false, new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase), 0);
     }
 
     private static DocumentEntry? SelectThumbnail(IReadOnlyList<DocumentEntry> files)
@@ -564,6 +732,22 @@ public sealed class EagleLibraryIndexer
             return 0;
         }
 
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        if (property.ValueKind == JsonValueKind.String
+            && long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return 0;
+    }
+
+    private static long ReadLongValue(JsonElement property)
+    {
         if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var number))
         {
             return number;

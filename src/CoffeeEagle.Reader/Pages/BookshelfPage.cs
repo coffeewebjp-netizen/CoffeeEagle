@@ -631,10 +631,24 @@ public sealed class BookshelfPage : ContentPage
         var audioCount = library.Assets.Count(asset => asset.MediaKind == EagleAssetMediaKind.Audio);
         var videoCount = library.Assets.Count(asset => asset.MediaKind == EagleAssetMediaKind.Video);
         var summary = $"{library.SourceLabel}  {_visibleAssets.Count:N0} / {library.Assets.Count:N0} items  IMAGE {imageCount:N0} AUDIO {audioCount:N0} VIDEO {videoCount:N0}  Indexed {library.IndexedAt:yyyy-MM-dd HH:mm}";
-        return library.Assets.Count == 0 && !string.IsNullOrWhiteSpace(library.IndexMessage)
+        return ShouldShowIndexMessage(library)
             ? summary + "  " + library.IndexMessage
             : summary;
     }
+
+    private static bool ShouldShowIndexMessage(EagleLibrary library)
+    {
+        if (string.IsNullOrWhiteSpace(library.IndexMessage))
+        {
+            return false;
+        }
+
+        return library.Assets.Count == 0
+            || library.IndexMessage.Contains("missing", StringComparison.OrdinalIgnoreCase)
+            || library.IndexMessage.Contains("recovered", StringComparison.OrdinalIgnoreCase)
+            || library.IndexMessage.Contains("read-fail", StringComparison.OrdinalIgnoreCase);
+    }
+
     private string ResolveSelectedFolderName()
     {
         if (_state.SelectedFolderId == UnfiledFoldersId)

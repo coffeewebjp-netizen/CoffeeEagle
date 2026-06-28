@@ -25,6 +25,7 @@ EAGLE の `.library` フォルダを対象にする。
 ```text
 Sample.library/
   metadata.json
+  mtime.json
   images/
     <asset-id>.info/
       metadata.json
@@ -39,12 +40,15 @@ Android側は次の情報を索引として保存する。
 - アセットID、名前、ファイル名、タグ、フォルダID
 - サムネイルURI、表示用ファイルURI
 - サイズ、作成日、更新日など取得できる軽量メタデータ
+- 更新時の差分検知に使う `mtime.json` のアセットIDと件数
 
 ## Google Drive フォルダ
 
 初期実装では Android の Storage Access Framework で Google Drive Provider のフォルダを選ぶ。アプリ内では `Google Driveフォルダ追加` と `端末/同期フォルダ追加` を分け、選択された URI の provider を見て source kind を保存する。
 
 この方式ならGoogle API認証をアプリに追加せず、端末に入っているGoogle DriveアプリとAndroid標準の権限管理に任せられる。もし実機でDrive Providerが `.library` フォルダの再帰読み取りを許可しない場合は、CoffeeBook Readerと同じブラウザOAuth + PKCEのDrive API方式へ切り替える。
+
+更新時はルートの `mtime.json` があれば先に読み、Drive Providerの再帰列挙で見えた `images/*.info` と照合する。`mtime.json` に存在するのに列挙されないIDは、`images/<asset-id>.info` として直接Document URI候補を問い合わせ、取れる場合は索引へ回収する。`mtime` では差分検知と直接参照の試行まではできるが、Google Drive Providerが一覧も直接参照も古い場合はファイル本体を発見できない。その場合はDrive API方式へ切り替える。
 
 ## 機能スコープ
 
@@ -59,6 +63,7 @@ Android側は次の情報を索引として保存する。
 - グリッド密度切り替え
 - 全画面表示
 - 左右スワイプで次/前の画像へ移動
+- 音声ファイルのアプリ内再生、動画ファイルの外部アプリ連携
 
 後続候補:
 

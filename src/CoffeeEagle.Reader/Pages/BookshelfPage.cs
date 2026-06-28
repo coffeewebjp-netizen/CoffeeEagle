@@ -643,8 +643,8 @@ public sealed class BookshelfPage : ContentPage
         };
         var panel = new Border
         {
-            BackgroundColor = Colors.Transparent,
-            Stroke = Color.FromArgb("#66334150"),
+            BackgroundColor = Color.FromArgb("#660B0E12"),
+            Stroke = Color.FromArgb("#80334150"),
             StrokeThickness = 1,
             StrokeShape = new RoundRectangle { CornerRadius = 12 },
             Content = popup,
@@ -1366,7 +1366,7 @@ public sealed class BookshelfPage : ContentPage
             var footer = new Grid
             {
                 Padding = new Thickness(14, 10),
-                BackgroundColor = Color.FromArgb("#400B0E12"),
+                BackgroundColor = Color.FromArgb("#560B0E12"),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Star),

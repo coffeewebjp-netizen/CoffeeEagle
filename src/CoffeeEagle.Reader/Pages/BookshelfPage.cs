@@ -643,8 +643,8 @@ public sealed class BookshelfPage : ContentPage
         };
         var panel = new Border
         {
-            BackgroundColor = Color.FromArgb("#A80B0E12"),
-            Stroke = Color.FromArgb("#80334150"),
+            BackgroundColor = Colors.Transparent,
+            Stroke = Color.FromArgb("#66334150"),
             StrokeThickness = 1,
             StrokeShape = new RoundRectangle { CornerRadius = 12 },
             Content = popup,
@@ -1168,12 +1168,12 @@ public sealed class BookshelfPage : ContentPage
                 TextColor = Colors.White,
                 PlaceholderColor = Color.FromArgb("#667386"),
                 CancelButtonColor = Color.FromArgb("#21C7A8"),
-                BackgroundColor = Color.FromArgb("#6612171D"),
+                BackgroundColor = Color.FromArgb("#4012171D"),
                 Margin = new Thickness(14, 0, 14, 8)
             };
             search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
 
-            var scroll = new ScrollView { Content = _list };
+            var scroll = new ScrollView { BackgroundColor = Colors.Transparent, Content = _list };
             var root = new Grid
             {
                 RowDefinitions =
@@ -1272,8 +1272,8 @@ public sealed class BookshelfPage : ContentPage
 
             var border = new Border
             {
-                BackgroundColor = option.IsDestructive ? Color.FromArgb("#60371C20") : option.IsSelected ? Color.FromArgb("#90162B29") : Color.FromArgb("#6010161D"),
-                Stroke = option.IsDestructive ? Color.FromArgb("#A8553A42") : option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#8023303C"),
+                BackgroundColor = option.IsDestructive ? Color.FromArgb("#50371C20") : option.IsSelected ? Color.FromArgb("#60162B29") : Color.FromArgb("#4010161D"),
+                Stroke = option.IsDestructive ? Color.FromArgb("#88553A42") : option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#6623303C"),
                 StrokeThickness = 1,
                 StrokeShape = new RoundRectangle { CornerRadius = 8 },
                 Content = row
@@ -1349,7 +1349,7 @@ public sealed class BookshelfPage : ContentPage
                 TextColor = Colors.White,
                 PlaceholderColor = Color.FromArgb("#667386"),
                 CancelButtonColor = Color.FromArgb("#21C7A8"),
-                BackgroundColor = Color.FromArgb("#6612171D"),
+                BackgroundColor = Color.FromArgb("#4012171D"),
                 Margin = new Thickness(14, 0, 14, 8)
             };
             search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
@@ -1366,7 +1366,7 @@ public sealed class BookshelfPage : ContentPage
             var footer = new Grid
             {
                 Padding = new Thickness(14, 10),
-                BackgroundColor = Color.FromArgb("#700B0E12"),
+                BackgroundColor = Color.FromArgb("#400B0E12"),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Star),
@@ -1379,7 +1379,7 @@ public sealed class BookshelfPage : ContentPage
             Grid.SetColumn(clearButton, 1);
             Grid.SetColumn(doneButton, 2);
 
-            var scroll = new ScrollView { Content = _list };
+            var scroll = new ScrollView { BackgroundColor = Colors.Transparent, Content = _list };
             var root = new Grid
             {
                 RowDefinitions =
@@ -1480,8 +1480,8 @@ public sealed class BookshelfPage : ContentPage
             Grid.SetColumn(count, 2);
             var border = new Border
             {
-                BackgroundColor = isSelected ? Color.FromArgb("#90162B29") : Color.FromArgb("#6010161D"),
-                Stroke = isSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#8023303C"),
+                BackgroundColor = isSelected ? Color.FromArgb("#60162B29") : Color.FromArgb("#4010161D"),
+                Stroke = isSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#6623303C"),
                 StrokeThickness = 1,
                 StrokeShape = new RoundRectangle { CornerRadius = 8 },
                 Content = row

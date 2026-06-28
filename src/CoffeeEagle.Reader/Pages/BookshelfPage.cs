@@ -528,9 +528,7 @@ public sealed class BookshelfPage : ContentPage
             .Select(group => new TagCount(group.Key, group.Count()))
             .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        var page = new TagSelectionPage(tagCounts, _state.SelectedTags, _activeLibrary.Assets.Count);
-        await Navigation.PushModalAsync(new NavigationPage(page));
-        var selectedTags = await page.Completion;
+        var selectedTags = await ShowTagPopupAsync(tagCounts, _state.SelectedTags, _activeLibrary.Assets.Count);
         if (selectedTags is null)
         {
             return;
@@ -541,6 +539,59 @@ public sealed class BookshelfPage : ContentPage
         await SaveStateAsync();
         RefreshVisibleAssets();
     }
+
+    private async Task<List<string>?> ShowTagPopupAsync(
+        IReadOnlyList<TagCount> tagCounts,
+        IEnumerable<string> selectedTags,
+        int assetCount)
+    {
+        if (Content is not Grid root)
+        {
+            return null;
+        }
+
+        var popup = new TagPopupView(tagCounts, selectedTags, assetCount);
+        var dimmer = new BoxView
+        {
+            Color = Color.FromArgb("#99000000"),
+            InputTransparent = false
+        };
+        var panel = new Border
+        {
+            BackgroundColor = Color.FromArgb("#0B0E12"),
+            Stroke = Color.FromArgb("#23303C"),
+            StrokeThickness = 1,
+            StrokeShape = new RoundRectangle { CornerRadius = 12 },
+            Content = popup,
+            VerticalOptions = LayoutOptions.End,
+            HeightRequest = Math.Min(Math.Max(420, Height * 0.72), 620),
+            Margin = new Thickness(10, 0, 10, 10)
+        };
+        var overlay = new Grid
+        {
+            Opacity = 0,
+            Children = { dimmer, panel }
+        };
+        Grid.SetRowSpan(overlay, Math.Max(1, root.RowDefinitions.Count));
+
+        var dimmerTap = new TapGestureRecognizer();
+        dimmerTap.Tapped += (_, _) => popup.Cancel();
+        dimmer.GestureRecognizers.Add(dimmerTap);
+
+        root.Children.Add(overlay);
+        panel.TranslationY = 32;
+        await Task.WhenAll(
+            overlay.FadeToAsync(1, 140, Easing.CubicOut),
+            panel.TranslateToAsync(0, 0, 180, Easing.CubicOut));
+
+        var result = await popup.Completion;
+        await Task.WhenAll(
+            overlay.FadeToAsync(0, 120, Easing.CubicIn),
+            panel.TranslateToAsync(0, 32, 120, Easing.CubicIn));
+        root.Children.Remove(overlay);
+        return result;
+    }
+
     private bool IsSelectedFolder(string folderId)
     {
         return string.Equals(_state.SelectedFolderId ?? AllFoldersId, folderId, StringComparison.OrdinalIgnoreCase);
@@ -1160,7 +1211,7 @@ public sealed class BookshelfPage : ContentPage
         }
     }
 
-    private sealed class TagSelectionPage : ContentPage
+    private sealed class TagPopupView : ContentView
     {
         private readonly TaskCompletionSource<List<string>?> _completion = new();
         private readonly HashSet<string> _selected;
@@ -1175,13 +1226,11 @@ public sealed class BookshelfPage : ContentPage
 
         public Task<List<string>?> Completion => _completion.Task;
 
-        public TagSelectionPage(IReadOnlyList<TagCount> tags, IEnumerable<string> selectedTags, int assetCount)
+        public TagPopupView(IReadOnlyList<TagCount> tags, IEnumerable<string> selectedTags, int assetCount)
         {
             _tags = tags;
             _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
-            Title = "タグ";
             BackgroundColor = Color.FromArgb("#0B0E12");
-            NavigationPage.SetHasNavigationBar(this, false);
 
             var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
             closeButton.Clicked += (_, _) => Complete(null);
@@ -1263,12 +1312,6 @@ public sealed class BookshelfPage : ContentPage
             Grid.SetRow(footer, 3);
             Content = root;
             Render(string.Empty);
-        }
-
-        protected override bool OnBackButtonPressed()
-        {
-            Complete(null);
-            return true;
         }
 
         private void Render(string filter)
@@ -1370,14 +1413,14 @@ public sealed class BookshelfPage : ContentPage
             _selectedLabel.Text = _selected.Count == 0 ? "タグ未選択" : $"{_selected.Count:N0} selected";
         }
 
-        private async void Complete(List<string>? selectedTags)
+        public void Cancel()
         {
-            if (!_completion.TrySetResult(selectedTags))
-            {
-                return;
-            }
+            Complete(null);
+        }
 
-            await Navigation.PopModalAsync();
+        private void Complete(List<string>? selectedTags)
+        {
+            _completion.TrySetResult(selectedTags);
         }
     }
 
@@ -1397,6 +1440,7 @@ public sealed class BookshelfPage : ContentPage
             Padding = new Thickness(14, 0)
         };
     }
+
     private VerticalStackLayout CreateEmptyActions()
     {
         return new VerticalStackLayout

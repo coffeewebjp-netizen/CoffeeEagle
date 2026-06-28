@@ -636,9 +636,9 @@ public sealed class BookshelfPage : ContentPage
 
         var previousCancel = _activeSheetCancel;
         _activeSheetCancel = cancel;
-        var dimmer = new BoxView
+        var backdrop = new Grid
         {
-            Color = Colors.Transparent,
+            BackgroundColor = Color.FromArgb("#01000000"),
             InputTransparent = false
         };
         var panel = new Border
@@ -656,14 +656,14 @@ public sealed class BookshelfPage : ContentPage
         {
             Opacity = 0,
             InputTransparent = false,
-            Children = { dimmer, panel }
+            Children = { backdrop, panel }
         };
         Grid.SetRowSpan(overlay, Math.Max(1, root.RowDefinitions.Count));
         overlay.ZIndex = 1000;
 
-        var dimmerTap = new TapGestureRecognizer();
-        dimmerTap.Tapped += (_, _) => cancel();
-        dimmer.GestureRecognizers.Add(dimmerTap);
+        var backdropTap = new TapGestureRecognizer();
+        backdropTap.Tapped += (_, _) => cancel();
+        backdrop.GestureRecognizers.Add(backdropTap);
 
         TResult? result = default;
         root.Children.Add(overlay);

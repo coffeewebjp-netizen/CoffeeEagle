@@ -8,6 +8,7 @@ public sealed class BookshelfPage : ContentPage
 {
     private const string AllFoldersId = "__all__";
     private const string UnfiledFoldersId = "__unfiled__";
+    private const string RemoveLibraryPrefix = "__remove_library__:";
 
     private readonly EagleLibraryStore _store;
     private readonly EagleLibraryIndexer _indexer;
@@ -452,11 +453,24 @@ public sealed class BookshelfPage : ContentPage
                 new PickerOption("__add_drive_provider__", "Google Drive Providerフォルダ追加", "AndroidのGoogle Drive Providerから追加", false, "追加"),
                 new PickerOption("__add_device__", "端末/同期フォルダ追加", "端末または同期フォルダから追加", false, "追加")
             ])
+            .Concat(_libraries.Select(library => new PickerOption(
+                RemoveLibraryPrefix + library.Id,
+                "削除: " + library.Name,
+                "アプリの登録から外します。元ファイルは削除しません",
+                false,
+                "登録削除",
+                IsDestructive: true)))
             .ToList();
 
-        var selected = await ShowOptionPickerAsync("ライブラリ", "切り替え / 追加", options, searchPlaceholder: "ライブラリを検索");
+        var selected = await ShowOptionPickerAsync("ライブラリ", "切り替え / 追加 / 登録削除", options, searchPlaceholder: "ライブラリを検索");
         if (selected is null)
         {
+            return;
+        }
+
+        if (selected.Id.StartsWith(RemoveLibraryPrefix, StringComparison.Ordinal))
+        {
+            await RemoveLibraryAsync(selected.Id[RemoveLibraryPrefix.Length..]);
             return;
         }
 
@@ -489,6 +503,45 @@ public sealed class BookshelfPage : ContentPage
         _state.SelectedFolderId = AllFoldersId;
         _state.SelectedTags.Clear();
         _state.SelectedTag = null;
+        await SaveStateAsync();
+        RefreshVisibleAssets();
+    }
+
+    private async Task RemoveLibraryAsync(string libraryId)
+    {
+        var library = _libraries.FirstOrDefault(item => string.Equals(item.Id, libraryId, StringComparison.Ordinal));
+        if (library is null)
+        {
+            return;
+        }
+
+        var remove = await DisplayAlertAsync(
+            "ライブラリ登録を削除",
+            $"{library.Name} をこのアプリの一覧から削除します。Google Drive/端末上の元ファイルは削除しません。",
+            "削除",
+            "キャンセル");
+        if (!remove)
+        {
+            return;
+        }
+
+        var wasActive = string.Equals(_activeLibrary?.Id, library.Id, StringComparison.Ordinal);
+        _libraries.RemoveAll(item => string.Equals(item.Id, library.Id, StringComparison.Ordinal));
+        if (wasActive)
+        {
+            _activeLibrary = _libraries.FirstOrDefault();
+            _state.ActiveLibraryId = _activeLibrary?.Id;
+            _state.SelectedFolderId = AllFoldersId;
+            _state.SelectedTags.Clear();
+            _state.SelectedTag = null;
+        }
+        else if (_state.ActiveLibraryId is not null
+            && _libraries.All(item => !string.Equals(item.Id, _state.ActiveLibraryId, StringComparison.Ordinal)))
+        {
+            _activeLibrary = _libraries.FirstOrDefault();
+            _state.ActiveLibraryId = _activeLibrary?.Id;
+        }
+
         await SaveStateAsync();
         RefreshVisibleAssets();
     }
@@ -585,13 +638,13 @@ public sealed class BookshelfPage : ContentPage
         _activeSheetCancel = cancel;
         var dimmer = new BoxView
         {
-            Color = Color.FromArgb("#48000000"),
+            Color = Colors.Transparent,
             InputTransparent = false
         };
         var panel = new Border
         {
-            BackgroundColor = Color.FromArgb("#F00B0E12"),
-            Stroke = Color.FromArgb("#334150"),
+            BackgroundColor = Color.FromArgb("#A80B0E12"),
+            Stroke = Color.FromArgb("#80334150"),
             StrokeThickness = 1,
             StrokeShape = new RoundRectangle { CornerRadius = 12 },
             Content = popup,
@@ -1062,7 +1115,8 @@ public sealed class BookshelfPage : ContentPage
         string Detail,
         bool IsSelected = false,
         string Eyebrow = "",
-        int Depth = 0);
+        int Depth = 0,
+        bool IsDestructive = false);
 
     private sealed record TagCount(string Name, int Count);
 
@@ -1079,7 +1133,7 @@ public sealed class BookshelfPage : ContentPage
         {
             _options = options;
             _emptyText = title + "がありません";
-            BackgroundColor = Color.FromArgb("#F00B0E12");
+            BackgroundColor = Colors.Transparent;
 
             var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
             closeButton.Clicked += (_, _) => Complete(null);
@@ -1114,7 +1168,7 @@ public sealed class BookshelfPage : ContentPage
                 TextColor = Colors.White,
                 PlaceholderColor = Color.FromArgb("#667386"),
                 CancelButtonColor = Color.FromArgb("#21C7A8"),
-                BackgroundColor = Color.FromArgb("#12171D"),
+                BackgroundColor = Color.FromArgb("#6612171D"),
                 Margin = new Thickness(14, 0, 14, 8)
             };
             search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
@@ -1185,15 +1239,15 @@ public sealed class BookshelfPage : ContentPage
             var eyebrow = new Label
             {
                 Text = option.Eyebrow,
-                TextColor = option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#667386"),
+                TextColor = option.IsDestructive ? Color.FromArgb("#FF8A8A") : option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#667386"),
                 FontSize = 11,
                 FontAttributes = FontAttributes.Bold,
                 LineBreakMode = LineBreakMode.TailTruncation
             };
             var selected = new Label
             {
-                Text = option.IsSelected ? "選択中" : string.Empty,
-                TextColor = Color.FromArgb("#21C7A8"),
+                Text = option.IsDestructive ? "削除" : option.IsSelected ? "選択中" : string.Empty,
+                TextColor = option.IsDestructive ? Color.FromArgb("#FF8A8A") : Color.FromArgb("#21C7A8"),
                 FontSize = 12,
                 FontAttributes = FontAttributes.Bold,
                 VerticalTextAlignment = TextAlignment.Center
@@ -1218,8 +1272,8 @@ public sealed class BookshelfPage : ContentPage
 
             var border = new Border
             {
-                BackgroundColor = option.IsSelected ? Color.FromArgb("#162B29") : Color.FromArgb("#10161D"),
-                Stroke = option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#23303C"),
+                BackgroundColor = option.IsDestructive ? Color.FromArgb("#60371C20") : option.IsSelected ? Color.FromArgb("#90162B29") : Color.FromArgb("#6010161D"),
+                Stroke = option.IsDestructive ? Color.FromArgb("#A8553A42") : option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#8023303C"),
                 StrokeThickness = 1,
                 StrokeShape = new RoundRectangle { CornerRadius = 8 },
                 Content = row
@@ -1260,7 +1314,7 @@ public sealed class BookshelfPage : ContentPage
         {
             _tags = tags;
             _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
-            BackgroundColor = Color.FromArgb("#F00B0E12");
+            BackgroundColor = Colors.Transparent;
 
             var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
             closeButton.Clicked += (_, _) => Complete(null);
@@ -1295,7 +1349,7 @@ public sealed class BookshelfPage : ContentPage
                 TextColor = Colors.White,
                 PlaceholderColor = Color.FromArgb("#667386"),
                 CancelButtonColor = Color.FromArgb("#21C7A8"),
-                BackgroundColor = Color.FromArgb("#12171D"),
+                BackgroundColor = Color.FromArgb("#6612171D"),
                 Margin = new Thickness(14, 0, 14, 8)
             };
             search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
@@ -1312,7 +1366,7 @@ public sealed class BookshelfPage : ContentPage
             var footer = new Grid
             {
                 Padding = new Thickness(14, 10),
-                BackgroundColor = Color.FromArgb("#D80B0E12"),
+                BackgroundColor = Color.FromArgb("#700B0E12"),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Star),
@@ -1426,8 +1480,8 @@ public sealed class BookshelfPage : ContentPage
             Grid.SetColumn(count, 2);
             var border = new Border
             {
-                BackgroundColor = isSelected ? Color.FromArgb("#162B29") : Color.FromArgb("#10161D"),
-                Stroke = isSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#23303C"),
+                BackgroundColor = isSelected ? Color.FromArgb("#90162B29") : Color.FromArgb("#6010161D"),
+                Stroke = isSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#8023303C"),
                 StrokeThickness = 1,
                 StrokeShape = new RoundRectangle { CornerRadius = 8 },
                 Content = row

@@ -13,12 +13,38 @@ public sealed class EagleImageSourceService
 
     public ImageSource? CreateThumbnailSource(EagleAsset asset)
     {
-        return CreateContentSource(asset.ThumbnailUri ?? asset.FileUri);
+        var uri = asset.MediaKind == EagleAssetMediaKind.Image
+            ? asset.ThumbnailUri ?? asset.FileUri
+            : asset.ThumbnailUri;
+        return CreateContentSource(uri);
+    }
+
+    public Task OpenExternalAsync(EagleAsset asset)
+    {
+        var uri = asset.FileUri ?? asset.ThumbnailUri;
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            throw new InvalidOperationException("開けるファイルがありません。");
+        }
+
+        _documents.OpenExternal(uri, ResolveMimeType(asset));
+        return Task.CompletedTask;
     }
 
     public ImageSource? CreateFullSource(EagleAsset asset)
     {
         return CreateContentSource(asset.FileUri ?? asset.ThumbnailUri);
+    }
+
+    private static string ResolveMimeType(EagleAsset asset)
+    {
+        return asset.MediaKind switch
+        {
+            EagleAssetMediaKind.Audio => "audio/*",
+            EagleAssetMediaKind.Video => "video/*",
+            EagleAssetMediaKind.Image => "image/*",
+            _ => "*/*"
+        };
     }
 
     private ImageSource? CreateContentSource(string? uri)
@@ -41,4 +67,3 @@ public sealed class EagleImageSourceService
         });
     }
 }
-

@@ -11,6 +11,16 @@ public sealed class EagleLibraryIndexer
         ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"
     };
 
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".aiff", ".aif"
+    };
+
+    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".3gp"
+    };
+
     private readonly AndroidDocumentTreeService _documents;
 
     public EagleLibraryIndexer(AndroidDocumentTreeService documents)
@@ -47,7 +57,7 @@ public sealed class EagleLibraryIndexer
         }
 
         NormalizeFolderPaths(folders);
-        progress?.Report("画像情報を索引化中...");
+        progress?.Report("メディア情報を索引化中...");
         var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, progress, cancellationToken);
         var assets = scan.Assets;
         EnsureReferencedFolders(folders, assets);
@@ -165,13 +175,17 @@ public sealed class EagleLibraryIndexer
             await using var stream = _documents.OpenRead(metadataEntry.Uri);
             using var metadata = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
             var root = metadata.RootElement;
-            var imageFiles = children.Where(child => !child.IsDirectory && IsImageFile(child)).ToList();
+            var files = children.Where(child => !child.IsDirectory).ToList();
+            var imageFiles = files.Where(IsImageFile).ToList();
+            var mediaFiles = files.Where(IsSupportedMediaFile).ToList();
             scan.ImageFiles += imageFiles.Count;
+            scan.MediaFiles += mediaFiles.Count;
             var thumbnail = SelectThumbnail(imageFiles);
-            var fullImage = SelectFullImage(imageFiles, thumbnail);
+            var primaryFile = SelectPrimaryMedia(mediaFiles, thumbnail);
+            var mediaKind = ResolveMediaKind(primaryFile, root);
             var id = ReadString(root, "id", "uuid") ?? TrimInfoSuffix(infoDirectory.Name);
             var fileName = ReadString(root, "fileName", "filename")
-                ?? fullImage?.Name
+                ?? primaryFile?.Name
                 ?? thumbnail?.Name
                 ?? string.Empty;
             var name = ReadString(root, "name", "title")
@@ -185,8 +199,9 @@ public sealed class EagleLibraryIndexer
                 Name = string.IsNullOrWhiteSpace(name) ? TrimInfoSuffix(infoDirectory.Name) : name,
                 FileName = fileName,
                 Extension = extension,
-                FileUri = fullImage?.Uri ?? thumbnail?.Uri,
-                ThumbnailUri = thumbnail?.Uri ?? fullImage?.Uri,
+                FileUri = primaryFile?.Uri ?? thumbnail?.Uri,
+                ThumbnailUri = thumbnail?.Uri ?? (mediaKind == EagleAssetMediaKind.Image ? primaryFile?.Uri : null),
+                MediaKind = mediaKind,
                 FolderIds = ReadStringArray(root, "folders", "folderIds", "folderId")
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
@@ -196,7 +211,7 @@ public sealed class EagleLibraryIndexer
                     .ToList(),
                 SourceUrl = ReadString(root, "url", "source", "sourceUrl"),
                 Annotation = ReadString(root, "annotation", "note", "description"),
-                SizeBytes = fullImage?.Size ?? thumbnail?.Size ?? ReadLong(root, "size", "sizeBytes"),
+                SizeBytes = primaryFile?.Size ?? thumbnail?.Size ?? ReadLong(root, "size", "sizeBytes"),
                 Width = (int)ReadLong(root, "width"),
                 Height = (int)ReadLong(root, "height"),
                 CreatedAt = ReadDate(root, "btime", "createdAt", "createTime", "birthTime"),
@@ -219,11 +234,12 @@ public sealed class EagleLibraryIndexer
         public int MetadataFiles { get; set; }
         public int MetadataMissing { get; set; }
         public int ImageFiles { get; set; }
+        public int MediaFiles { get; set; }
         public int AssetReadFailures { get; set; }
 
         public string ToMessage()
         {
-            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}";
+            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}";
         }
     }
 
@@ -237,11 +253,12 @@ public sealed class EagleLibraryIndexer
             .FirstOrDefault();
     }
 
-    private static DocumentEntry? SelectFullImage(IReadOnlyList<DocumentEntry> files, DocumentEntry? thumbnail)
+    private static DocumentEntry? SelectPrimaryMedia(IReadOnlyList<DocumentEntry> files, DocumentEntry? thumbnail)
     {
         return files
             .Where(file => thumbnail is null || !string.Equals(file.DocumentId, thumbnail.DocumentId, StringComparison.Ordinal))
-            .OrderByDescending(file => file.Size)
+            .OrderBy(file => IsImageFile(file) && IsLikelyThumbnail(file) ? 1 : 0)
+            .ThenByDescending(file => file.Size)
             .FirstOrDefault()
             ?? thumbnail;
     }
@@ -249,6 +266,11 @@ public sealed class EagleLibraryIndexer
     private static bool IsMetadataFile(DocumentEntry entry)
     {
         return !entry.IsDirectory && string.Equals(entry.Name, "metadata.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSupportedMediaFile(DocumentEntry entry)
+    {
+        return IsImageFile(entry) || IsAudioFile(entry) || IsVideoFile(entry);
     }
 
     private static bool IsImageFile(DocumentEntry entry)
@@ -259,6 +281,75 @@ public sealed class EagleLibraryIndexer
         }
 
         return ImageExtensions.Contains(Path.GetExtension(entry.Name));
+    }
+
+    private static bool IsAudioFile(DocumentEntry entry)
+    {
+        if (entry.MimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return AudioExtensions.Contains(Path.GetExtension(entry.Name));
+    }
+
+    private static bool IsVideoFile(DocumentEntry entry)
+    {
+        if (entry.MimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return VideoExtensions.Contains(Path.GetExtension(entry.Name));
+    }
+
+    private static bool IsLikelyThumbnail(DocumentEntry entry)
+    {
+        return entry.Name.Contains("thumb", StringComparison.OrdinalIgnoreCase)
+            || entry.Name.Contains("thumbnail", StringComparison.OrdinalIgnoreCase)
+            || entry.Name.StartsWith("cover", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveMediaKind(DocumentEntry? primaryFile, JsonElement metadata)
+    {
+        var extension = NormalizeExtension(ReadString(metadata, "ext", "extension") ?? Path.GetExtension(primaryFile?.Name ?? string.Empty));
+        if (primaryFile is not null)
+        {
+            if (IsAudioFile(primaryFile))
+            {
+                return EagleAssetMediaKind.Audio;
+            }
+
+            if (IsVideoFile(primaryFile))
+            {
+                return EagleAssetMediaKind.Video;
+            }
+
+            if (IsImageFile(primaryFile))
+            {
+                return EagleAssetMediaKind.Image;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(extension))
+        {
+            if (AudioExtensions.Contains(extension))
+            {
+                return EagleAssetMediaKind.Audio;
+            }
+
+            if (VideoExtensions.Contains(extension))
+            {
+                return EagleAssetMediaKind.Video;
+            }
+
+            if (ImageExtensions.Contains(extension))
+            {
+                return EagleAssetMediaKind.Image;
+            }
+        }
+
+        return EagleAssetMediaKind.Other;
     }
 
     private static List<EagleFolder> ReadFolders(JsonElement root)
@@ -534,8 +625,3 @@ public sealed class EagleLibraryIndexer
         return normalized.StartsWith('.') ? normalized : "." + normalized;
     }
 }
-
-
-
-
-

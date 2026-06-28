@@ -554,7 +554,7 @@ public sealed class BookshelfPage : ContentPage
         return card;
     }
 
-    private void OnAssetSelected(object? sender, SelectionChangedEventArgs e)
+    private async void OnAssetSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (e.CurrentSelection.FirstOrDefault() is not EagleAsset asset)
         {
@@ -568,7 +568,20 @@ public sealed class BookshelfPage : ContentPage
             return;
         }
 
-        Navigation.PushAsync(new ViewerPage(_visibleAssets.ToList(), index, _imageSources));
+        if (asset.MediaKind == EagleAssetMediaKind.Image)
+        {
+            await Navigation.PushAsync(new ViewerPage(_visibleAssets.ToList(), index, _imageSources));
+            return;
+        }
+
+        try
+        {
+            await _imageSources.OpenExternalAsync(asset);
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("開けません", ex.Message, "OK");
+        }
     }
 
     private void ApplyDensity(bool refresh)
@@ -675,7 +688,14 @@ public sealed class BookshelfPage : ContentPage
     {
         var extension = string.IsNullOrWhiteSpace(asset.Extension) ? "file" : asset.Extension.TrimStart('.').ToUpperInvariant();
         var size = FormatBytes(asset.SizeBytes);
-        return string.IsNullOrWhiteSpace(size) ? extension : $"{extension}  {size}";
+        var kind = asset.MediaKind switch
+        {
+            EagleAssetMediaKind.Audio => "AUDIO",
+            EagleAssetMediaKind.Video => "VIDEO",
+            EagleAssetMediaKind.Image => "IMAGE",
+            _ => "FILE"
+        };
+        return string.IsNullOrWhiteSpace(size) ? $"{kind}  {extension}" : $"{kind}  {extension}  {size}";
     }
 
     private static string FormatBytes(long bytes)

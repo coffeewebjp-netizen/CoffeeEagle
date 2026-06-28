@@ -87,6 +87,10 @@ public sealed class EagleLibraryStore
             {
                 asset.FolderIds ??= [];
                 asset.Tags ??= [];
+                if (string.IsNullOrWhiteSpace(asset.MediaKind))
+                {
+                    asset.MediaKind = EagleAssetMediaKind.Image;
+                }
             }
         }
 

@@ -56,6 +56,15 @@ public sealed class AndroidDocumentTreeService
             ?? throw new InvalidOperationException("ファイルを開けませんでした。");
     }
 
+    public void OpenExternal(string uriString, string mimeType)
+    {
+        var activity = MainActivity.Current ?? throw new InvalidOperationException("Android activity is not ready.");
+        var uri = ParseUri(uriString);
+        var intent = new Intent(Intent.ActionView);
+        intent.SetDataAndType(uri, mimeType);
+        intent.AddFlags(ActivityFlags.GrantReadUriPermission);
+        activity.StartActivity(Intent.CreateChooser(intent, "開く"));
+    }
     public string GetSourceKind(string treeUriString)
     {
         var authority = ParseUri(treeUriString).Authority ?? string.Empty;
@@ -147,4 +156,3 @@ public sealed record DocumentEntry(
 {
     public bool IsDirectory => string.Equals(MimeType, DocumentsContract.Document.MimeTypeDir, StringComparison.Ordinal);
 }
-

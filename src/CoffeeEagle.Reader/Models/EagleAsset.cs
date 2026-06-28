@@ -14,6 +14,8 @@ public sealed class EagleAsset
 
     public string? ThumbnailUri { get; set; }
 
+    public string MediaKind { get; set; } = EagleAssetMediaKind.Image;
+
     public List<string> FolderIds { get; set; } = [];
 
     public List<string> Tags { get; set; } = [];
@@ -37,6 +39,7 @@ public sealed class EagleAsset
         Name,
         FileName,
         Extension ?? string.Empty,
+        MediaKind,
         SourceUrl ?? string.Empty,
         Annotation ?? string.Empty,
         string.Join(' ', Tags)

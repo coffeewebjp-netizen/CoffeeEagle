@@ -72,6 +72,7 @@ public sealed class EagleLibraryStore
                 library.SourceLabel = library.SourceKind == EagleLibrarySourceKind.GoogleDrive ? "Google Drive" : "端末フォルダ";
             }
 
+            library.IndexMessage ??= string.Empty;
             library.Folders ??= [];
             library.Assets ??= [];
             foreach (var asset in library.Assets)
@@ -91,4 +92,6 @@ public sealed class EagleLibraryStore
         return state;
     }
 }
+
+
 

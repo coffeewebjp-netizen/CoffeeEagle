@@ -273,6 +273,10 @@ public sealed class BookshelfPage : ContentPage
             _state.SelectedTag = null;
             await SaveStateAsync();
             RefreshVisibleAssets();
+            if (library.Assets.Count == 0)
+            {
+                await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
+            }
         }
         catch (Exception ex)
         {
@@ -559,13 +563,21 @@ public sealed class BookshelfPage : ContentPage
         _emptyLabel.Text = _activeLibrary is null
             ? "EAGLE .library フォルダを選択"
             : "表示できる項目がありません";
-        _googleDriveSelectButton.IsVisible = _activeLibrary is null;
-        _deviceFolderSelectButton.IsVisible = _activeLibrary is null;
+        var showSelectActions = _activeLibrary is null || _activeLibrary.Assets.Count == 0;
+        _googleDriveSelectButton.IsVisible = showSelectActions;
+        _deviceFolderSelectButton.IsVisible = showSelectActions;
         _summaryLabel.Text = _activeLibrary is null
             ? "Google Drive または端末上の EAGLE .library を選択"
-            : $"{_activeLibrary.SourceLabel}  {_visibleAssets.Count:N0} / {_activeLibrary.Assets.Count:N0} items  Indexed {_activeLibrary.IndexedAt:yyyy-MM-dd HH:mm}";
+            : CreateSummaryText(_activeLibrary);
     }
 
+    private string CreateSummaryText(EagleLibrary library)
+    {
+        var summary = $"{library.SourceLabel}  {_visibleAssets.Count:N0} / {library.Assets.Count:N0} items  Indexed {library.IndexedAt:yyyy-MM-dd HH:mm}";
+        return library.Assets.Count == 0 && !string.IsNullOrWhiteSpace(library.IndexMessage)
+            ? summary + "  " + library.IndexMessage
+            : summary;
+    }
     private string ResolveSelectedFolderName()
     {
         if (_state.SelectedFolderId == UnfiledFoldersId)
@@ -712,3 +724,7 @@ public sealed class BookshelfPage : ContentPage
         };
     }
 }
+
+
+
+

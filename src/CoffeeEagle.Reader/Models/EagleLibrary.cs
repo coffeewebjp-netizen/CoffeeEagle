@@ -14,9 +14,13 @@ public sealed class EagleLibrary
 
     public string RootDocumentId { get; set; } = string.Empty;
 
+    public string IndexMessage { get; set; } = string.Empty;
+
     public DateTimeOffset IndexedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<EagleFolder> Folders { get; set; } = [];
 
     public List<EagleAsset> Assets { get; set; } = [];
 }
+
+

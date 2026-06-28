@@ -48,7 +48,8 @@ public sealed class EagleLibraryIndexer
 
         NormalizeFolderPaths(folders);
         progress?.Report("画像情報を索引化中...");
-        var assets = await ScanAssetsAsync(treeUriString, imagesDirectory, progress, cancellationToken);
+        var scan = await ScanAssetsAsync(treeUriString, imagesDirectory, progress, cancellationToken);
+        var assets = scan.Assets;
         EnsureReferencedFolders(folders, assets);
         NormalizeFolderPaths(folders);
 
@@ -60,6 +61,7 @@ public sealed class EagleLibraryIndexer
             SourceLabel = _documents.GetSourceLabel(treeUriString),
             TreeUri = treeUriString,
             RootDocumentId = root.DocumentId,
+            IndexMessage = scan.ToMessage(),
             IndexedAt = DateTimeOffset.UtcNow,
             Folders = folders
                 .OrderBy(folder => folder.Path, StringComparer.CurrentCultureIgnoreCase)
@@ -74,13 +76,14 @@ public sealed class EagleLibraryIndexer
 
     public bool IsGoogleDriveTree(string treeUriString) => _documents.IsGoogleDriveTree(treeUriString);
 
-    private async Task<List<EagleAsset>> ScanAssetsAsync(
+    private async Task<AssetScanResult> ScanAssetsAsync(
         string treeUriString,
         DocumentEntry imagesDirectory,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var assets = new List<EagleAsset>();
+        var scan = new AssetScanResult();
+        var assets = scan.Assets;
         var pendingDirectories = new Queue<DocumentEntry>();
         pendingDirectories.Enqueue(imagesDirectory);
 
@@ -88,6 +91,7 @@ public sealed class EagleLibraryIndexer
         {
             cancellationToken.ThrowIfCancellationRequested();
             var directory = pendingDirectories.Dequeue();
+            scan.VisitedDirectories++;
             IReadOnlyList<DocumentEntry> children;
             try
             {
@@ -95,6 +99,7 @@ public sealed class EagleLibraryIndexer
             }
             catch
             {
+                scan.DirectoryReadFailures++;
                 continue;
             }
 
@@ -108,7 +113,8 @@ public sealed class EagleLibraryIndexer
 
                 if (child.Name.EndsWith(".info", StringComparison.OrdinalIgnoreCase))
                 {
-                    var asset = await TryReadAssetAsync(treeUriString, child, cancellationToken);
+                    scan.InfoDirectories++;
+                    var asset = await TryReadAssetAsync(treeUriString, child, scan, cancellationToken);
                     if (asset is not null)
                     {
                         assets.Add(asset);
@@ -125,13 +131,14 @@ public sealed class EagleLibraryIndexer
             }
         }
 
-        progress?.Report($"{assets.Count} 件を索引化しました");
-        return assets;
+        progress?.Report(scan.ToMessage());
+        return scan;
     }
 
     private async Task<EagleAsset?> TryReadAssetAsync(
         string treeUriString,
         DocumentEntry infoDirectory,
+        AssetScanResult scan,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<DocumentEntry> children;
@@ -141,21 +148,25 @@ public sealed class EagleLibraryIndexer
         }
         catch
         {
+            scan.DirectoryReadFailures++;
             return null;
         }
 
         var metadataEntry = children.FirstOrDefault(IsMetadataFile);
         if (metadataEntry is null)
         {
+            scan.MetadataMissing++;
             return null;
         }
 
+        scan.MetadataFiles++;
         try
         {
             await using var stream = _documents.OpenRead(metadataEntry.Uri);
             using var metadata = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
             var root = metadata.RootElement;
             var imageFiles = children.Where(child => !child.IsDirectory && IsImageFile(child)).ToList();
+            scan.ImageFiles += imageFiles.Count;
             var thumbnail = SelectThumbnail(imageFiles);
             var fullImage = SelectFullImage(imageFiles, thumbnail);
             var id = ReadString(root, "id", "uuid") ?? TrimInfoSuffix(infoDirectory.Name);
@@ -194,7 +205,25 @@ public sealed class EagleLibraryIndexer
         }
         catch
         {
+            scan.AssetReadFailures++;
             return null;
+        }
+    }
+
+    private sealed class AssetScanResult
+    {
+        public List<EagleAsset> Assets { get; } = [];
+        public int VisitedDirectories { get; set; }
+        public int DirectoryReadFailures { get; set; }
+        public int InfoDirectories { get; set; }
+        public int MetadataFiles { get; set; }
+        public int MetadataMissing { get; set; }
+        public int ImageFiles { get; set; }
+        public int AssetReadFailures { get; set; }
+
+        public string ToMessage()
+        {
+            return $"{Assets.Count} 件を索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, images {ImageFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}";
         }
     }
 
@@ -505,5 +534,8 @@ public sealed class EagleLibraryIndexer
         return normalized.StartsWith('.') ? normalized : "." + normalized;
     }
 }
+
+
+
 
 

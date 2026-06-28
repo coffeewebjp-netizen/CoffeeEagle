@@ -19,6 +19,21 @@ public sealed class AndroidDocumentTreeService
     private ContentResolver Resolver => MainActivity.Current?.ContentResolver
         ?? throw new InvalidOperationException("Android activity is not ready.");
 
+    public void RequestProviderRefresh(string treeUriString)
+    {
+        try
+        {
+            var treeUri = ParseUri(treeUriString);
+            var refreshMethod = typeof(ContentResolver).GetMethod(
+                "Refresh",
+                [typeof(AndroidUri), typeof(Android.OS.Bundle), typeof(Android.OS.CancellationSignal)]);
+            refreshMethod?.Invoke(Resolver, [treeUri, null, null]);
+        }
+        catch
+        {
+            // Document providers may ignore or not implement refresh. Indexing can still continue.
+        }
+    }
     public DocumentEntry GetRoot(string treeUriString)
     {
         var treeUri = ParseUri(treeUriString);
@@ -156,3 +171,4 @@ public sealed record DocumentEntry(
 {
     public bool IsDirectory => string.Equals(MimeType, DocumentsContract.Document.MimeTypeDir, StringComparison.Ordinal);
 }
+

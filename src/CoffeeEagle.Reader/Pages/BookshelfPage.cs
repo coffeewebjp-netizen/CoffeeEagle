@@ -574,6 +574,12 @@ public sealed class BookshelfPage : ContentPage
             return;
         }
 
+        if (asset.MediaKind == EagleAssetMediaKind.Audio)
+        {
+            await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index));
+            return;
+        }
+
         try
         {
             await _imageSources.OpenExternalAsync(asset);
@@ -972,4 +978,3 @@ public sealed class BookshelfPage : ContentPage
         };
     }
 }
-

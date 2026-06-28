@@ -34,6 +34,7 @@ public sealed class EagleLibraryIndexer
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        _documents.RequestProviderRefresh(treeUriString);
         var root = _documents.GetRoot(treeUriString);
         var rootChildren = _documents.ListChildren(treeUriString, root.DocumentId);
         var rootMetadata = rootChildren.FirstOrDefault(IsMetadataFile);
@@ -668,4 +669,5 @@ public sealed class EagleLibraryIndexer
         return normalized.StartsWith('.') ? normalized : "." + normalized;
     }
 }
+
 

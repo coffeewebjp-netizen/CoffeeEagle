@@ -428,40 +428,51 @@ public sealed class BookshelfPage : ContentPage
 
     private async Task ShowLibraryMenuAsync()
     {
-        var labels = _libraries
-            .Select((library, index) => $"{index + 1}. [{library.SourceLabel}] {library.Name}")
-            .Concat(["Google Drive APIフォルダ追加", "Google Drive Providerフォルダ追加", "端末/同期フォルダ追加"])
-            .ToArray();
-        var selected = await DisplayActionSheetAsync("ライブラリ", "キャンセル", null, labels);
-        if (string.IsNullOrWhiteSpace(selected) || selected == "キャンセル")
+        var options = _libraries
+            .Select(library => new PickerOption(
+                library.Id,
+                library.Name,
+                $"{library.SourceLabel}  {library.Assets.Count:N0} items",
+                string.Equals(library.Id, _activeLibrary?.Id, StringComparison.Ordinal),
+                "ライブラリ"))
+            .Concat([
+                new PickerOption("__add_drive_api__", "Google Drive APIフォルダ追加", "Drive APIでEAGLE .libraryを追加", false, "追加"),
+                new PickerOption("__add_drive_provider__", "Google Drive Providerフォルダ追加", "AndroidのGoogle Drive Providerから追加", false, "追加"),
+                new PickerOption("__add_device__", "端末/同期フォルダ追加", "端末または同期フォルダから追加", false, "追加")
+            ])
+            .ToList();
+
+        var selected = await ShowOptionPickerAsync("ライブラリ", "切り替え / 追加", options, searchPlaceholder: "ライブラリを検索");
+        if (selected is null)
         {
             return;
         }
 
-        if (selected == "Google Drive APIフォルダ追加")
+        if (selected.Id == "__add_drive_api__")
         {
             await AddGoogleDriveApiLibraryAsync();
             return;
         }
 
-        if (selected == "Google Drive Providerフォルダ追加")
+        if (selected.Id == "__add_drive_provider__")
         {
             await AddLibraryAsync(preferGoogleDrive: true);
             return;
         }
-        if (selected == "端末/同期フォルダ追加")
+
+        if (selected.Id == "__add_device__")
         {
             await AddLibraryAsync();
             return;
         }
 
-        var selectedIndex = Array.IndexOf(labels, selected);
-        if (selectedIndex < 0 || selectedIndex >= _libraries.Count)
+        var library = _libraries.FirstOrDefault(item => string.Equals(item.Id, selected.Id, StringComparison.Ordinal));
+        if (library is null)
         {
             return;
         }
 
-        _activeLibrary = _libraries[selectedIndex];
+        _activeLibrary = library;
         _state.ActiveLibraryId = _activeLibrary.Id;
         _state.SelectedFolderId = AllFoldersId;
         _state.SelectedTags.Clear();
@@ -479,20 +490,26 @@ public sealed class BookshelfPage : ContentPage
         }
 
         var items = BuildFolderMenuItems(_activeLibrary);
-        var labels = new List<string> { "すべて", "未分類" };
-        labels.AddRange(items.Select(item => item.Label));
-        var selected = await DisplayActionSheetAsync("フォルダ", "キャンセル", null, labels.ToArray());
-        if (string.IsNullOrWhiteSpace(selected) || selected == "キャンセル")
+        var options = new List<PickerOption>
+        {
+            new(AllFoldersId, "すべて", $"{_activeLibrary.Assets.Count:N0} items", IsSelectedFolder(AllFoldersId), "フォルダ"),
+            new(UnfiledFoldersId, "未分類", $"{_activeLibrary.Assets.Count(asset => asset.FolderIds.Count == 0):N0} items", IsSelectedFolder(UnfiledFoldersId), "フォルダ")
+        };
+        options.AddRange(items.Select(item => new PickerOption(
+            item.Folder.Id,
+            item.DisplayName,
+            item.Count > 0 ? $"{item.Count:N0} items" : "空のフォルダ",
+            IsSelectedFolder(item.Folder.Id),
+            item.Depth == 0 ? "フォルダ" : $"階層 {item.Depth + 1}",
+            item.Depth)));
+
+        var selected = await ShowOptionPickerAsync("フォルダ", "階層から選択", options, searchPlaceholder: "フォルダを検索");
+        if (selected is null)
         {
             return;
         }
 
-        _state.SelectedFolderId = selected switch
-        {
-            "すべて" => AllFoldersId,
-            "未分類" => UnfiledFoldersId,
-            _ => items.FirstOrDefault(item => string.Equals(item.Label, selected, StringComparison.Ordinal))?.Folder.Id ?? AllFoldersId
-        };
+        _state.SelectedFolderId = selected.Id;
         await SaveStateAsync();
         RefreshVisibleAssets();
     }
@@ -511,7 +528,7 @@ public sealed class BookshelfPage : ContentPage
             .Select(group => new TagCount(group.Key, group.Count()))
             .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        var page = new TagSelectionPage(tagCounts, _state.SelectedTags);
+        var page = new TagSelectionPage(tagCounts, _state.SelectedTags, _activeLibrary.Assets.Count);
         await Navigation.PushModalAsync(new NavigationPage(page));
         var selectedTags = await page.Completion;
         if (selectedTags is null)
@@ -523,6 +540,21 @@ public sealed class BookshelfPage : ContentPage
         _state.SelectedTag = _state.SelectedTags.FirstOrDefault();
         await SaveStateAsync();
         RefreshVisibleAssets();
+    }
+    private bool IsSelectedFolder(string folderId)
+    {
+        return string.Equals(_state.SelectedFolderId ?? AllFoldersId, folderId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<PickerOption?> ShowOptionPickerAsync(
+        string title,
+        string subtitle,
+        IReadOnlyList<PickerOption> options,
+        string searchPlaceholder)
+    {
+        var page = new OptionPickerPage(title, subtitle, options, searchPlaceholder);
+        await Navigation.PushModalAsync(new NavigationPage(page));
+        return await page.Completion;
     }
     private async Task CycleDensityAsync()
     {
@@ -915,14 +947,8 @@ public sealed class BookshelfPage : ContentPage
 
         foreach (var folder in folders)
         {
-            var hasChildren = childrenByParent.ContainsKey(folder.Id);
             var count = CountAssetsInFolderTree(library, folder.Id);
-            var indent = new string('　', Math.Min(depth, 8));
-            var marker = hasChildren ? "▾ " : "  ";
-            var label = count > 0
-                ? $"{indent}{marker}{folder.Name}    {count:N0}"
-                : $"{indent}{marker}{folder.Name}";
-            items.Add(new FolderMenuItem(label, folder));
+            items.Add(new FolderMenuItem(folder.Name, folder, depth, count));
             AppendFolderMenuItems(library, childrenByParent, folder.Id, depth + 1, items);
         }
     }
@@ -939,66 +965,88 @@ public sealed class BookshelfPage : ContentPage
         return library.Assets.Count(asset => asset.FolderIds.Any(assetFolderId => IsFolderOrDescendant(library, assetFolderId, folderId)));
     }
 
-    private sealed record FolderMenuItem(string Label, EagleFolder Folder);
+    private sealed record FolderMenuItem(string DisplayName, EagleFolder Folder, int Depth, int Count);
+
+    private sealed record PickerOption(
+        string Id,
+        string Title,
+        string Detail,
+        bool IsSelected = false,
+        string Eyebrow = "",
+        int Depth = 0);
 
     private sealed record TagCount(string Name, int Count);
 
-    private sealed class TagSelectionPage : ContentPage
+    private sealed class OptionPickerPage : ContentPage
     {
-        private readonly TaskCompletionSource<List<string>?> _completion = new();
-        private readonly HashSet<string> _selected;
+        private readonly TaskCompletionSource<PickerOption?> _completion = new();
+        private readonly IReadOnlyList<PickerOption> _options;
+        private readonly VerticalStackLayout _list = new() { Padding = new Thickness(14, 8, 14, 18), Spacing = 8 };
+        private readonly string _emptyText;
 
-        public Task<List<string>?> Completion => _completion.Task;
+        public Task<PickerOption?> Completion => _completion.Task;
 
-        public TagSelectionPage(IReadOnlyList<TagCount> tags, IEnumerable<string> selectedTags)
+        public OptionPickerPage(string title, string subtitle, IReadOnlyList<PickerOption> options, string searchPlaceholder)
         {
-            _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
-            Title = "タグ";
+            _options = options;
+            _emptyText = title + "がありません";
+            Title = title;
             BackgroundColor = Color.FromArgb("#0B0E12");
-            NavigationPage.SetHasNavigationBar(this, true);
+            NavigationPage.SetHasNavigationBar(this, false);
 
-            ToolbarItems.Add(new ToolbarItem("クリア", null, () =>
+            var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
+            closeButton.Clicked += (_, _) => Complete(null);
+
+            var header = new Grid
             {
-                _selected.Clear();
-                Complete(_selected.ToList());
-            }));
-            ToolbarItems.Add(new ToolbarItem("完了", null, () => Complete(_selected.OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase).ToList())));
+                Padding = new Thickness(16, 16, 16, 10),
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition(GridLength.Star),
+                    new ColumnDefinition(GridLength.Auto)
+                },
+                Children =
+                {
+                    new VerticalStackLayout
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new Label { Text = title, TextColor = Colors.White, FontSize = 22, FontAttributes = FontAttributes.Bold },
+                            new Label { Text = subtitle, TextColor = Color.FromArgb("#98A4B5"), FontSize = 12 }
+                        }
+                    },
+                    closeButton
+                }
+            };
+            Grid.SetColumn(closeButton, 1);
 
             var search = new SearchBar
             {
-                Placeholder = "タグを検索",
+                Placeholder = searchPlaceholder,
                 TextColor = Colors.White,
                 PlaceholderColor = Color.FromArgb("#667386"),
                 CancelButtonColor = Color.FromArgb("#21C7A8"),
-                BackgroundColor = Color.FromArgb("#12171D")
+                BackgroundColor = Color.FromArgb("#12171D"),
+                Margin = new Thickness(14, 0, 14, 8)
             };
-
-            var list = new VerticalStackLayout { Spacing = 0 };
-            void Render(string filter)
-            {
-                list.Children.Clear();
-                var visibleTags = tags.Where(tag => string.IsNullOrWhiteSpace(filter) || tag.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase));
-                foreach (var tag in visibleTags)
-                {
-                    list.Children.Add(CreateTagRow(tag));
-                }
-            }
-
             search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
-            Render(string.Empty);
 
-            var scroll = new ScrollView { Content = list };
+            var scroll = new ScrollView { Content = _list };
             var root = new Grid
             {
                 RowDefinitions =
                 {
                     new RowDefinition(GridLength.Auto),
+                    new RowDefinition(GridLength.Auto),
                     new RowDefinition(GridLength.Star)
                 },
-                Children = { search, scroll }
+                Children = { header, search, scroll }
             };
-            Grid.SetRow(scroll, 1);
+            Grid.SetRow(search, 1);
+            Grid.SetRow(scroll, 2);
             Content = root;
+            Render(string.Empty);
         }
 
         protected override bool OnBackButtonPressed()
@@ -1007,11 +1055,254 @@ public sealed class BookshelfPage : ContentPage
             return true;
         }
 
+        private void Render(string filter)
+        {
+            _list.Children.Clear();
+            var visibleOptions = _options
+                .Where(option => string.IsNullOrWhiteSpace(filter)
+                    || option.Title.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
+                    || option.Detail.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
+                    || option.Eyebrow.Contains(filter, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+
+            if (visibleOptions.Count == 0)
+            {
+                _list.Children.Add(new Label
+                {
+                    Text = _emptyText,
+                    TextColor = Color.FromArgb("#98A4B5"),
+                    FontSize = 14,
+                    HorizontalTextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(0, 28, 0, 0)
+                });
+                return;
+            }
+
+            foreach (var option in visibleOptions)
+            {
+                _list.Children.Add(CreateOptionRow(option));
+            }
+        }
+
+        private View CreateOptionRow(PickerOption option)
+        {
+            var title = new Label
+            {
+                Text = option.Title,
+                TextColor = Colors.White,
+                FontSize = 16,
+                FontAttributes = FontAttributes.Bold,
+                LineBreakMode = LineBreakMode.TailTruncation
+            };
+            var detail = new Label
+            {
+                Text = option.Detail,
+                TextColor = Color.FromArgb("#98A4B5"),
+                FontSize = 12,
+                LineBreakMode = LineBreakMode.TailTruncation
+            };
+            var eyebrow = new Label
+            {
+                Text = option.Eyebrow,
+                TextColor = option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#667386"),
+                FontSize = 11,
+                FontAttributes = FontAttributes.Bold,
+                LineBreakMode = LineBreakMode.TailTruncation
+            };
+            var selected = new Label
+            {
+                Text = option.IsSelected ? "選択中" : string.Empty,
+                TextColor = Color.FromArgb("#21C7A8"),
+                FontSize = 12,
+                FontAttributes = FontAttributes.Bold,
+                VerticalTextAlignment = TextAlignment.Center
+            };
+            var content = new VerticalStackLayout
+            {
+                Spacing = 2,
+                Children = { eyebrow, title, detail }
+            };
+            var row = new Grid
+            {
+                Padding = new Thickness(12 + Math.Min(option.Depth, 8) * 16, 10, 12, 10),
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition(GridLength.Star),
+                    new ColumnDefinition(GridLength.Auto)
+                },
+                ColumnSpacing = 10,
+                Children = { content, selected }
+            };
+            Grid.SetColumn(selected, 1);
+
+            var border = new Border
+            {
+                BackgroundColor = option.IsSelected ? Color.FromArgb("#162B29") : Color.FromArgb("#10161D"),
+                Stroke = option.IsSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#23303C"),
+                StrokeThickness = 1,
+                StrokeShape = new RoundRectangle { CornerRadius = 8 },
+                Content = row
+            };
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += (_, _) => Complete(option);
+            border.GestureRecognizers.Add(tap);
+            return border;
+        }
+
+        private async void Complete(PickerOption? selected)
+        {
+            if (!_completion.TrySetResult(selected))
+            {
+                return;
+            }
+
+            await Navigation.PopModalAsync();
+        }
+    }
+
+    private sealed class TagSelectionPage : ContentPage
+    {
+        private readonly TaskCompletionSource<List<string>?> _completion = new();
+        private readonly HashSet<string> _selected;
+        private readonly IReadOnlyList<TagCount> _tags;
+        private readonly VerticalStackLayout _list = new() { Padding = new Thickness(14, 8, 14, 86), Spacing = 8 };
+        private readonly Label _selectedLabel = new()
+        {
+            TextColor = Color.FromArgb("#98A4B5"),
+            FontSize = 12,
+            VerticalTextAlignment = TextAlignment.Center
+        };
+
+        public Task<List<string>?> Completion => _completion.Task;
+
+        public TagSelectionPage(IReadOnlyList<TagCount> tags, IEnumerable<string> selectedTags, int assetCount)
+        {
+            _tags = tags;
+            _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
+            Title = "タグ";
+            BackgroundColor = Color.FromArgb("#0B0E12");
+            NavigationPage.SetHasNavigationBar(this, false);
+
+            var closeButton = CreateSheetButton("閉じる", Color.FromArgb("#172029"), Colors.White);
+            closeButton.Clicked += (_, _) => Complete(null);
+
+            var header = new Grid
+            {
+                Padding = new Thickness(16, 16, 16, 10),
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition(GridLength.Star),
+                    new ColumnDefinition(GridLength.Auto)
+                },
+                Children =
+                {
+                    new VerticalStackLayout
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new Label { Text = "タグ", TextColor = Colors.White, FontSize = 22, FontAttributes = FontAttributes.Bold },
+                            new Label { Text = $"複数選択  {assetCount:N0} items", TextColor = Color.FromArgb("#98A4B5"), FontSize = 12 }
+                        }
+                    },
+                    closeButton
+                }
+            };
+            Grid.SetColumn(closeButton, 1);
+
+            var search = new SearchBar
+            {
+                Placeholder = "タグを検索",
+                TextColor = Colors.White,
+                PlaceholderColor = Color.FromArgb("#667386"),
+                CancelButtonColor = Color.FromArgb("#21C7A8"),
+                BackgroundColor = Color.FromArgb("#12171D"),
+                Margin = new Thickness(14, 0, 14, 8)
+            };
+            search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
+
+            var clearButton = CreateSheetButton("クリア", Color.FromArgb("#172029"), Colors.White);
+            clearButton.Clicked += (_, _) =>
+            {
+                _selected.Clear();
+                Render(search.Text ?? string.Empty);
+            };
+            var doneButton = CreateSheetButton("完了", Color.FromArgb("#21C7A8"), Color.FromArgb("#06130F"));
+            doneButton.Clicked += (_, _) => Complete(_selected.OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase).ToList());
+
+            var footer = new Grid
+            {
+                Padding = new Thickness(14, 10),
+                BackgroundColor = Color.FromArgb("#E00B0E12"),
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition(GridLength.Star),
+                    new ColumnDefinition(GridLength.Auto),
+                    new ColumnDefinition(GridLength.Auto)
+                },
+                ColumnSpacing = 8,
+                Children = { _selectedLabel, clearButton, doneButton }
+            };
+            Grid.SetColumn(clearButton, 1);
+            Grid.SetColumn(doneButton, 2);
+
+            var scroll = new ScrollView { Content = _list };
+            var root = new Grid
+            {
+                RowDefinitions =
+                {
+                    new RowDefinition(GridLength.Auto),
+                    new RowDefinition(GridLength.Auto),
+                    new RowDefinition(GridLength.Star),
+                    new RowDefinition(GridLength.Auto)
+                },
+                Children = { header, search, scroll, footer }
+            };
+            Grid.SetRow(search, 1);
+            Grid.SetRow(scroll, 2);
+            Grid.SetRow(footer, 3);
+            Content = root;
+            Render(string.Empty);
+        }
+
+        protected override bool OnBackButtonPressed()
+        {
+            Complete(null);
+            return true;
+        }
+
+        private void Render(string filter)
+        {
+            _list.Children.Clear();
+            var visibleTags = _tags
+                .Where(tag => string.IsNullOrWhiteSpace(filter) || tag.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+            foreach (var tag in visibleTags)
+            {
+                _list.Children.Add(CreateTagRow(tag));
+            }
+
+            if (visibleTags.Count == 0)
+            {
+                _list.Children.Add(new Label
+                {
+                    Text = "タグがありません",
+                    TextColor = Color.FromArgb("#98A4B5"),
+                    FontSize = 14,
+                    HorizontalTextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(0, 28, 0, 0)
+                });
+            }
+
+            UpdateSelectedLabel();
+        }
+
         private View CreateTagRow(TagCount tag)
         {
+            var isSelected = _selected.Contains(tag.Name);
             var checkBox = new CheckBox
             {
-                IsChecked = _selected.Contains(tag.Name),
+                IsChecked = isSelected,
                 Color = Color.FromArgb("#21C7A8"),
                 VerticalOptions = LayoutOptions.Center
             };
@@ -1042,11 +1333,13 @@ public sealed class BookshelfPage : ContentPage
                 {
                     _selected.Remove(tag.Name);
                 }
+
+                UpdateSelectedLabel();
             };
 
             var row = new Grid
             {
-                Padding = new Thickness(12, 7),
+                Padding = new Thickness(12, 10),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Auto),
@@ -1058,10 +1351,23 @@ public sealed class BookshelfPage : ContentPage
             };
             Grid.SetColumn(name, 1);
             Grid.SetColumn(count, 2);
+            var border = new Border
+            {
+                BackgroundColor = isSelected ? Color.FromArgb("#162B29") : Color.FromArgb("#10161D"),
+                Stroke = isSelected ? Color.FromArgb("#21C7A8") : Color.FromArgb("#23303C"),
+                StrokeThickness = 1,
+                StrokeShape = new RoundRectangle { CornerRadius = 8 },
+                Content = row
+            };
             var tap = new TapGestureRecognizer();
             tap.Tapped += (_, _) => checkBox.IsChecked = !checkBox.IsChecked;
-            row.GestureRecognizers.Add(tap);
-            return row;
+            border.GestureRecognizers.Add(tap);
+            return border;
+        }
+
+        private void UpdateSelectedLabel()
+        {
+            _selectedLabel.Text = _selected.Count == 0 ? "タグ未選択" : $"{_selected.Count:N0} selected";
         }
 
         private async void Complete(List<string>? selectedTags)
@@ -1073,6 +1379,23 @@ public sealed class BookshelfPage : ContentPage
 
             await Navigation.PopModalAsync();
         }
+    }
+
+    private static Button CreateSheetButton(string text, Color background, Color textColor)
+    {
+        return new Button
+        {
+            Text = text,
+            FontSize = 13,
+            FontAttributes = FontAttributes.Bold,
+            TextColor = textColor,
+            BackgroundColor = background,
+            BorderColor = Color.FromArgb("#2B3948"),
+            BorderWidth = 1,
+            CornerRadius = 8,
+            HeightRequest = 38,
+            Padding = new Thickness(14, 0)
+        };
     }
     private VerticalStackLayout CreateEmptyActions()
     {

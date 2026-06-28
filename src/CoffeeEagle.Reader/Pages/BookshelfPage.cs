@@ -53,7 +53,9 @@ public sealed class BookshelfPage : ContentPage
     private readonly Button _tagButton;
     private readonly Button _densityButton;
     private readonly Button _refreshButton;
-
+    private readonly VerticalStackLayout _emptyActions;
+    private readonly Button _googleDriveSelectButton;
+    private readonly Button _deviceFolderSelectButton;
     private EagleReaderState _state = new();
     private EagleLibrary? _activeLibrary;
     private bool _loaded;
@@ -77,12 +79,16 @@ public sealed class BookshelfPage : ContentPage
         _tagButton = CreateHeaderButton("Tag");
         _densityButton = CreateHeaderButton("3x");
         _refreshButton = CreateHeaderButton("更新");
-
+        _googleDriveSelectButton = CreatePrimaryButton("Google Driveから選択");
+        _deviceFolderSelectButton = CreateSecondaryButton("端末/同期フォルダを選択");
+        _emptyActions = CreateEmptyActions();
         _libraryButton.Clicked += async (_, _) => await ShowLibraryMenuAsync();
         _folderButton.Clicked += async (_, _) => await ShowFolderMenuAsync();
         _tagButton.Clicked += async (_, _) => await ShowTagMenuAsync();
         _densityButton.Clicked += async (_, _) => await CycleDensityAsync();
         _refreshButton.Clicked += async (_, _) => await RefreshActiveLibraryAsync();
+        _googleDriveSelectButton.Clicked += async (_, _) => await AddLibraryAsync(preferGoogleDrive: true);
+        _deviceFolderSelectButton.Clicked += async (_, _) => await AddLibraryAsync();
         _searchBar.TextChanged += (_, e) => UpdateSearch(e.NewTextValue ?? string.Empty);
         _searchBar.SearchButtonPressed += async (_, _) => await SaveStateAsync();
         _searchBar.Unfocused += async (_, _) => await SaveStateAsync();
@@ -162,7 +168,7 @@ public sealed class BookshelfPage : ContentPage
 
         var listLayer = new Grid
         {
-            Children = { _assetsView, _emptyLabel }
+            Children = { _assetsView, _emptyActions }
         };
 
         var root = new Grid
@@ -549,10 +555,12 @@ public sealed class BookshelfPage : ContentPage
         var folderText = ResolveSelectedFolderName();
         _folderButton.Text = folderText.Length > 9 ? folderText[..9] + "..." : folderText;
         _tagButton.Text = string.IsNullOrWhiteSpace(_state.SelectedTag) ? "Tag" : _state.SelectedTag;
-        _emptyLabel.IsVisible = _visibleAssets.Count == 0;
+        _emptyActions.IsVisible = _visibleAssets.Count == 0;
         _emptyLabel.Text = _activeLibrary is null
-            ? "ライブラリを追加"
+            ? "EAGLE .library フォルダを選択"
             : "表示できる項目がありません";
+        _googleDriveSelectButton.IsVisible = _activeLibrary is null;
+        _deviceFolderSelectButton.IsVisible = _activeLibrary is null;
         _summaryLabel.Text = _activeLibrary is null
             ? "Google Drive または端末上の EAGLE .library を選択"
             : $"{_activeLibrary.SourceLabel}  {_visibleAssets.Count:N0} / {_activeLibrary.Assets.Count:N0} items  Indexed {_activeLibrary.IndexedAt:yyyy-MM-dd HH:mm}";
@@ -592,6 +600,8 @@ public sealed class BookshelfPage : ContentPage
         _folderButton.IsEnabled = !isBusy;
         _tagButton.IsEnabled = !isBusy;
         _densityButton.IsEnabled = !isBusy;
+        _googleDriveSelectButton.IsEnabled = !isBusy;
+        _deviceFolderSelectButton.IsEnabled = !isBusy;
         if (!string.IsNullOrWhiteSpace(message))
         {
             _summaryLabel.Text = message;
@@ -640,6 +650,50 @@ public sealed class BookshelfPage : ContentPage
         return unitIndex == 0 ? $"{bytes} B" : $"{size:0.0} {units[unitIndex]}";
     }
 
+    private VerticalStackLayout CreateEmptyActions()
+    {
+        return new VerticalStackLayout
+        {
+            Padding = new Thickness(28, 0),
+            Spacing = 12,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            WidthRequest = 320,
+            Children = { _emptyLabel, _googleDriveSelectButton, _deviceFolderSelectButton }
+        };
+    }
+
+    private static Button CreatePrimaryButton(string text)
+    {
+        return new Button
+        {
+            Text = text,
+            FontSize = 15,
+            FontAttributes = FontAttributes.Bold,
+            TextColor = Color.FromArgb("#06130F"),
+            BackgroundColor = Color.FromArgb("#21C7A8"),
+            CornerRadius = 8,
+            HeightRequest = 48,
+            Padding = new Thickness(14, 0)
+        };
+    }
+
+    private static Button CreateSecondaryButton(string text)
+    {
+        return new Button
+        {
+            Text = text,
+            FontSize = 14,
+            FontAttributes = FontAttributes.Bold,
+            TextColor = Color.FromArgb("#EDF5F3"),
+            BackgroundColor = Color.FromArgb("#172029"),
+            BorderColor = Color.FromArgb("#2B3948"),
+            BorderWidth = 1,
+            CornerRadius = 8,
+            HeightRequest = 46,
+            Padding = new Thickness(14, 0)
+        };
+    }
     private static Button CreateHeaderButton(string text)
     {
         return new Button
@@ -658,9 +712,3 @@ public sealed class BookshelfPage : ContentPage
         };
     }
 }
-
-
-
-
-
-

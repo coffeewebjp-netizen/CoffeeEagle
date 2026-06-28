@@ -270,6 +270,7 @@ public sealed class BookshelfPage : ContentPage
             _activeLibrary = library;
             _state.ActiveLibraryId = library.Id;
             _state.SelectedFolderId = AllFoldersId;
+            _state.SelectedTags.Clear();
             _state.SelectedTag = null;
             await SaveStateAsync();
             RefreshVisibleAssets();
@@ -321,6 +322,7 @@ public sealed class BookshelfPage : ContentPage
         _activeLibrary = _libraries[selectedIndex];
         _state.ActiveLibraryId = _activeLibrary.Id;
         _state.SelectedFolderId = AllFoldersId;
+        _state.SelectedTags.Clear();
         _state.SelectedTag = null;
         await SaveStateAsync();
         RefreshVisibleAssets();
@@ -334,11 +336,9 @@ public sealed class BookshelfPage : ContentPage
             return;
         }
 
-        var folders = _activeLibrary.Folders
-            .OrderBy(folder => folder.Path, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+        var items = BuildFolderMenuItems(_activeLibrary);
         var labels = new List<string> { "すべて", "未分類" };
-        labels.AddRange(folders.Select(folder => folder.Path));
+        labels.AddRange(items.Select(item => item.Label));
         var selected = await DisplayActionSheetAsync("フォルダ", "キャンセル", null, labels.ToArray());
         if (string.IsNullOrWhiteSpace(selected) || selected == "キャンセル")
         {
@@ -349,7 +349,7 @@ public sealed class BookshelfPage : ContentPage
         {
             "すべて" => AllFoldersId,
             "未分類" => UnfiledFoldersId,
-            _ => folders.FirstOrDefault(folder => string.Equals(folder.Path, selected, StringComparison.Ordinal))?.Id ?? AllFoldersId
+            _ => items.FirstOrDefault(item => string.Equals(item.Label, selected, StringComparison.Ordinal))?.Folder.Id ?? AllFoldersId
         };
         await SaveStateAsync();
         RefreshVisibleAssets();
@@ -363,23 +363,25 @@ public sealed class BookshelfPage : ContentPage
             return;
         }
 
-        var tags = _activeLibrary.Assets
+        var tagCounts = _activeLibrary.Assets
             .SelectMany(asset => asset.Tags)
-            .Distinct(StringComparer.CurrentCultureIgnoreCase)
-            .OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray();
-        var labels = new[] { "すべて" }.Concat(tags).ToArray();
-        var selected = await DisplayActionSheetAsync("タグ", "キャンセル", null, labels);
-        if (string.IsNullOrWhiteSpace(selected) || selected == "キャンセル")
+            .GroupBy(tag => tag, StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => new TagCount(group.Key, group.Count()))
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var page = new TagSelectionPage(tagCounts, _state.SelectedTags);
+        await Navigation.PushModalAsync(new NavigationPage(page));
+        var selectedTags = await page.Completion;
+        if (selectedTags is null)
         {
             return;
         }
 
-        _state.SelectedTag = selected == "すべて" ? null : selected;
+        _state.SelectedTags = selectedTags;
+        _state.SelectedTag = _state.SelectedTags.FirstOrDefault();
         await SaveStateAsync();
         RefreshVisibleAssets();
     }
-
     private async Task CycleDensityAsync()
     {
         _state.GridSpan = _state.GridSpan >= 5 ? 2 : _state.GridSpan + 1;
@@ -406,24 +408,57 @@ public sealed class BookshelfPage : ContentPage
         UpdateHeaderText();
     }
 
+    private bool MatchesSelectedFolder(EagleAsset asset, string folderId)
+    {
+        if (folderId == UnfiledFoldersId)
+        {
+            return asset.FolderIds.Count == 0;
+        }
+
+        if (_activeLibrary is null)
+        {
+            return true;
+        }
+
+        return asset.FolderIds.Any(assetFolderId => IsFolderOrDescendant(_activeLibrary, assetFolderId, folderId));
+    }
+
+    private static bool IsFolderOrDescendant(EagleLibrary library, string folderId, string ancestorFolderId)
+    {
+        if (string.Equals(folderId, ancestorFolderId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var foldersById = library.Folders.ToDictionary(folder => folder.Id, StringComparer.OrdinalIgnoreCase);
+        var currentId = folderId;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (foldersById.TryGetValue(currentId, out var folder)
+            && !string.IsNullOrWhiteSpace(folder.ParentId)
+            && visited.Add(currentId))
+        {
+            if (string.Equals(folder.ParentId, ancestorFolderId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            currentId = folder.ParentId;
+        }
+
+        return false;
+    }
     private bool MatchesFilters(EagleAsset asset)
     {
         var folderId = _state.SelectedFolderId;
         if (!string.IsNullOrWhiteSpace(folderId)
             && folderId != AllFoldersId
-            && folderId != UnfiledFoldersId
-            && !asset.FolderIds.Any(id => string.Equals(id, folderId, StringComparison.OrdinalIgnoreCase)))
+            && !MatchesSelectedFolder(asset, folderId))
         {
             return false;
         }
 
-        if (folderId == UnfiledFoldersId && asset.FolderIds.Count > 0)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_state.SelectedTag)
-            && !asset.Tags.Any(tag => string.Equals(tag, _state.SelectedTag, StringComparison.CurrentCultureIgnoreCase)))
+        if (_state.SelectedTags.Count > 0
+            && !_state.SelectedTags.All(selectedTag => asset.Tags.Any(tag => string.Equals(tag, selectedTag, StringComparison.CurrentCultureIgnoreCase))))
         {
             return false;
         }
@@ -558,7 +593,7 @@ public sealed class BookshelfPage : ContentPage
         _libraryButton.Text = _activeLibrary is null ? "追加" : _activeLibrary.SourceLabel;
         var folderText = ResolveSelectedFolderName();
         _folderButton.Text = folderText.Length > 9 ? folderText[..9] + "..." : folderText;
-        _tagButton.Text = string.IsNullOrWhiteSpace(_state.SelectedTag) ? "Tag" : _state.SelectedTag;
+        _tagButton.Text = _state.SelectedTags.Count == 0 ? "Tag" : $"Tag {_state.SelectedTags.Count}";
         _emptyActions.IsVisible = _visibleAssets.Count == 0;
         _emptyLabel.Text = _activeLibrary is null
             ? "EAGLE .library フォルダを選択"
@@ -662,6 +697,196 @@ public sealed class BookshelfPage : ContentPage
         return unitIndex == 0 ? $"{bytes} B" : $"{size:0.0} {units[unitIndex]}";
     }
 
+    private List<FolderMenuItem> BuildFolderMenuItems(EagleLibrary library)
+    {
+        var foldersById = library.Folders.ToDictionary(folder => folder.Id, StringComparer.OrdinalIgnoreCase);
+        var childrenByParent = library.Folders
+            .GroupBy(folder => NormalizeParentId(folder.ParentId, foldersById), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderBy(folder => folder.SortOrder)
+                    .ThenBy(folder => folder.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        var items = new List<FolderMenuItem>();
+        AppendFolderMenuItems(library, childrenByParent, parentId: string.Empty, depth: 0, items);
+        return items;
+    }
+
+    private void AppendFolderMenuItems(
+        EagleLibrary library,
+        IReadOnlyDictionary<string, List<EagleFolder>> childrenByParent,
+        string parentId,
+        int depth,
+        List<FolderMenuItem> items)
+    {
+        if (!childrenByParent.TryGetValue(parentId, out var folders))
+        {
+            return;
+        }
+
+        foreach (var folder in folders)
+        {
+            var hasChildren = childrenByParent.ContainsKey(folder.Id);
+            var count = CountAssetsInFolderTree(library, folder.Id);
+            var indent = new string('　', Math.Min(depth, 8));
+            var marker = hasChildren ? "▾ " : "  ";
+            var label = count > 0
+                ? $"{indent}{marker}{folder.Name}    {count:N0}"
+                : $"{indent}{marker}{folder.Name}";
+            items.Add(new FolderMenuItem(label, folder));
+            AppendFolderMenuItems(library, childrenByParent, folder.Id, depth + 1, items);
+        }
+    }
+
+    private static string NormalizeParentId(string? parentId, IReadOnlyDictionary<string, EagleFolder> foldersById)
+    {
+        return !string.IsNullOrWhiteSpace(parentId) && foldersById.ContainsKey(parentId)
+            ? parentId
+            : string.Empty;
+    }
+
+    private static int CountAssetsInFolderTree(EagleLibrary library, string folderId)
+    {
+        return library.Assets.Count(asset => asset.FolderIds.Any(assetFolderId => IsFolderOrDescendant(library, assetFolderId, folderId)));
+    }
+
+    private sealed record FolderMenuItem(string Label, EagleFolder Folder);
+
+    private sealed record TagCount(string Name, int Count);
+
+    private sealed class TagSelectionPage : ContentPage
+    {
+        private readonly TaskCompletionSource<List<string>?> _completion = new();
+        private readonly HashSet<string> _selected;
+
+        public Task<List<string>?> Completion => _completion.Task;
+
+        public TagSelectionPage(IReadOnlyList<TagCount> tags, IEnumerable<string> selectedTags)
+        {
+            _selected = new HashSet<string>(selectedTags, StringComparer.CurrentCultureIgnoreCase);
+            Title = "タグ";
+            BackgroundColor = Color.FromArgb("#0B0E12");
+            NavigationPage.SetHasNavigationBar(this, true);
+
+            ToolbarItems.Add(new ToolbarItem("クリア", null, () =>
+            {
+                _selected.Clear();
+                Complete(_selected.ToList());
+            }));
+            ToolbarItems.Add(new ToolbarItem("完了", null, () => Complete(_selected.OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase).ToList())));
+
+            var search = new SearchBar
+            {
+                Placeholder = "タグを検索",
+                TextColor = Colors.White,
+                PlaceholderColor = Color.FromArgb("#667386"),
+                CancelButtonColor = Color.FromArgb("#21C7A8"),
+                BackgroundColor = Color.FromArgb("#12171D")
+            };
+
+            var list = new VerticalStackLayout { Spacing = 0 };
+            void Render(string filter)
+            {
+                list.Children.Clear();
+                var visibleTags = tags.Where(tag => string.IsNullOrWhiteSpace(filter) || tag.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase));
+                foreach (var tag in visibleTags)
+                {
+                    list.Children.Add(CreateTagRow(tag));
+                }
+            }
+
+            search.TextChanged += (_, e) => Render(e.NewTextValue ?? string.Empty);
+            Render(string.Empty);
+
+            var scroll = new ScrollView { Content = list };
+            var root = new Grid
+            {
+                RowDefinitions =
+                {
+                    new RowDefinition(GridLength.Auto),
+                    new RowDefinition(GridLength.Star)
+                },
+                Children = { search, scroll }
+            };
+            Grid.SetRow(scroll, 1);
+            Content = root;
+        }
+
+        protected override bool OnBackButtonPressed()
+        {
+            Complete(null);
+            return true;
+        }
+
+        private View CreateTagRow(TagCount tag)
+        {
+            var checkBox = new CheckBox
+            {
+                IsChecked = _selected.Contains(tag.Name),
+                Color = Color.FromArgb("#21C7A8"),
+                VerticalOptions = LayoutOptions.Center
+            };
+            var name = new Label
+            {
+                Text = tag.Name,
+                TextColor = Colors.White,
+                FontSize = 16,
+                FontAttributes = FontAttributes.Bold,
+                VerticalTextAlignment = TextAlignment.Center,
+                LineBreakMode = LineBreakMode.TailTruncation
+            };
+            var count = new Label
+            {
+                Text = tag.Count.ToString("N0"),
+                TextColor = Color.FromArgb("#98A4B5"),
+                FontSize = 13,
+                VerticalTextAlignment = TextAlignment.Center,
+                HorizontalTextAlignment = TextAlignment.End
+            };
+            checkBox.CheckedChanged += (_, e) =>
+            {
+                if (e.Value)
+                {
+                    _selected.Add(tag.Name);
+                }
+                else
+                {
+                    _selected.Remove(tag.Name);
+                }
+            };
+
+            var row = new Grid
+            {
+                Padding = new Thickness(12, 7),
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition(GridLength.Auto),
+                    new ColumnDefinition(GridLength.Star),
+                    new ColumnDefinition(GridLength.Auto)
+                },
+                ColumnSpacing = 10,
+                Children = { checkBox, name, count }
+            };
+            Grid.SetColumn(name, 1);
+            Grid.SetColumn(count, 2);
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += (_, _) => checkBox.IsChecked = !checkBox.IsChecked;
+            row.GestureRecognizers.Add(tap);
+            return row;
+        }
+
+        private async void Complete(List<string>? selectedTags)
+        {
+            if (!_completion.TrySetResult(selectedTags))
+            {
+                return;
+            }
+
+            await Navigation.PopModalAsync();
+        }
+    }
     private VerticalStackLayout CreateEmptyActions()
     {
         return new VerticalStackLayout
@@ -724,7 +949,3 @@ public sealed class BookshelfPage : ContentPage
         };
     }
 }
-
-
-
-

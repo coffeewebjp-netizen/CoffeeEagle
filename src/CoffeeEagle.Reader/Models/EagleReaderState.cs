@@ -8,6 +8,8 @@ public sealed class EagleReaderState
 
     public string? SelectedTag { get; set; }
 
+    public List<string> SelectedTags { get; set; } = [];
+
     public string SearchText { get; set; } = string.Empty;
 
     public int GridSpan { get; set; } = 3;

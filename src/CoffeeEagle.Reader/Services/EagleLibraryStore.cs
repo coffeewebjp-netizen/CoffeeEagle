@@ -59,6 +59,14 @@ public sealed class EagleLibraryStore
     {
         state.GridSpan = Math.Clamp(state.GridSpan <= 0 ? 3 : state.GridSpan, 2, 5);
         state.SearchText ??= string.Empty;
+        state.SelectedTags ??= [];
+        if (!string.IsNullOrWhiteSpace(state.SelectedTag)
+            && !state.SelectedTags.Contains(state.SelectedTag, StringComparer.CurrentCultureIgnoreCase))
+        {
+            state.SelectedTags.Add(state.SelectedTag);
+        }
+
+        state.SelectedTag = state.SelectedTags.FirstOrDefault();
         state.Libraries ??= [];
         foreach (var library in state.Libraries)
         {
@@ -92,6 +100,3 @@ public sealed class EagleLibraryStore
         return state;
     }
 }
-
-
-

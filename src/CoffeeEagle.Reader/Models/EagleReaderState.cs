@@ -14,6 +14,8 @@ public sealed class EagleReaderState
 
     public int GridSpan { get; set; } = 3;
 
+    public bool AudioContinuousPlayback { get; set; } = true;
+
     public string GoogleDriveClientId { get; set; } = "327808944898-qr1qd5imhe3ddp56feng1kmpkpqnq10c.apps.googleusercontent.com";
 
     public string? GoogleDriveClientSecret { get; set; }

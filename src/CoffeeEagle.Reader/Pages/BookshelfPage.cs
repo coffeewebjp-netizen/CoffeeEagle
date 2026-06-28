@@ -708,13 +708,15 @@ public sealed class BookshelfPage : ContentPage
 
         if (asset.MediaKind == EagleAssetMediaKind.Image)
         {
-            await Navigation.PushAsync(new ViewerPage(_visibleAssets.ToList(), index, _imageSources));
+            var imageAssets = _visibleAssets.Where(item => item.MediaKind == EagleAssetMediaKind.Image).ToList();
+            var imageIndex = imageAssets.FindIndex(item => string.Equals(item.Id, asset.Id, StringComparison.Ordinal));
+            await Navigation.PushAsync(new ViewerPage(imageAssets, Math.Max(0, imageIndex), _imageSources));
             return;
         }
 
         if (asset.MediaKind == EagleAssetMediaKind.Audio)
         {
-            await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index, _imageSources));
+            await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index, _imageSources, _store));
             return;
         }
 

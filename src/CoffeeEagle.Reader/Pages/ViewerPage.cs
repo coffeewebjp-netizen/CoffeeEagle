@@ -115,12 +115,12 @@ public sealed class ViewerPage : ContentPage
     {
         if (Content is View root)
         {
-            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, 1));
-            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, -1));
+            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, -1));
+            root.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, 1));
             root.GestureRecognizers.Add(CreateTapGesture());
         }
-        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, 1));
-        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, -1));
+        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Left, -1));
+        _image.GestureRecognizers.Add(CreateSwipeGesture(SwipeDirection.Right, 1));
         _image.GestureRecognizers.Add(CreateTapGesture());
     }
 

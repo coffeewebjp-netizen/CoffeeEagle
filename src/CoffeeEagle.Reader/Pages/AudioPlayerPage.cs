@@ -10,10 +10,12 @@ public sealed class AudioPlayerPage : ContentPage
     private readonly IReadOnlyList<EagleAsset> _assets;
     private int _index;
     private readonly EagleImageSourceService _mediaSources;
+    private readonly EagleLibraryStore _store;
     private MediaPlayer? _player;
     private bool _isPrepared;
     private bool _isSeeking;
     private bool _disposed;
+    private bool _continuousPlayback = true;
 
     private readonly Label _titleLabel = new()
     {
@@ -51,10 +53,12 @@ public sealed class AudioPlayerPage : ContentPage
     private readonly Button _playButton = CreateControlButton("再生", width: 96);
     private readonly Button _previousButton = CreateControlButton("前", width: 64);
     private readonly Button _nextButton = CreateControlButton("次", width: 64);
+    private readonly Button _continuousButton = CreateControlButton("連続 ON", width: 96);
 
-    public AudioPlayerPage(IReadOnlyList<EagleAsset> assets, int startIndex, EagleImageSourceService mediaSources)
+    public AudioPlayerPage(IReadOnlyList<EagleAsset> assets, int startIndex, EagleImageSourceService mediaSources, EagleLibraryStore store)
     {
         _mediaSources = mediaSources;
+        _store = store;
         _assets = assets.Where(asset => asset.MediaKind == EagleAssetMediaKind.Audio).ToList();
         var startAsset = assets.ElementAtOrDefault(startIndex);
         _index = startAsset is null ? 0 : Math.Max(0, _assets.ToList().FindIndex(asset => asset.Id == startAsset.Id));
@@ -69,6 +73,10 @@ public sealed class AudioPlayerPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        var state = await _store.LoadAsync();
+        _continuousPlayback = state.AudioContinuousPlayback;
+        UpdateContinuousButton();
+
         if (_player is null)
         {
             await LoadCurrentAsync(autoPlay: true);
@@ -99,11 +107,17 @@ public sealed class AudioPlayerPage : ContentPage
         };
         Grid.SetColumn(_metaLabel, 1);
 
-        var controls = new HorizontalStackLayout
+        var transportControls = new HorizontalStackLayout
         {
             Spacing = 12,
             HorizontalOptions = LayoutOptions.Center,
             Children = { _previousButton, _playButton, _nextButton }
+        };
+
+        var optionControls = new HorizontalStackLayout
+        {
+            HorizontalOptions = LayoutOptions.Center,
+            Children = { _continuousButton }
         };
 
         var panel = new VerticalStackLayout
@@ -124,7 +138,8 @@ public sealed class AudioPlayerPage : ContentPage
                 _titleLabel,
                 _positionSlider,
                 _timeLabel,
-                controls
+                transportControls,
+                optionControls
             }
         };
 
@@ -144,6 +159,7 @@ public sealed class AudioPlayerPage : ContentPage
         _playButton.Clicked += (_, _) => TogglePlayback();
         _previousButton.Clicked += async (_, _) => await MoveAsync(-1);
         _nextButton.Clicked += async (_, _) => await MoveAsync(1);
+        _continuousButton.Clicked += async (_, _) => await ToggleContinuousPlaybackAsync();
         _positionSlider.DragStarted += (_, _) => _isSeeking = true;
         _positionSlider.DragCompleted += (_, _) =>
         {
@@ -215,7 +231,7 @@ public sealed class AudioPlayerPage : ContentPage
                     }
                 });
             };
-            _player.Completion += (_, _) => MainThread.BeginInvokeOnMainThread(async () => await MoveAsync(1));
+            _player.Completion += (_, _) => MainThread.BeginInvokeOnMainThread(async () => await HandleCompletionAsync());
             if (uri is null)
             {
                 _player.SetDataSource(playbackPath);
@@ -233,6 +249,51 @@ public sealed class AudioPlayerPage : ContentPage
             _playButton.IsEnabled = true;
             await DisplayAlertAsync("再生できません", ex.Message, "OK");
         }
+    }
+
+    private async Task HandleCompletionAsync()
+    {
+        if (_continuousPlayback && _index < _assets.Count - 1)
+        {
+            await MoveAsync(1);
+            return;
+        }
+
+        if (_player is null || !_isPrepared)
+        {
+            return;
+        }
+
+        try
+        {
+            _player.SeekTo(0);
+        }
+        catch
+        {
+            // Ignore player state races at completion.
+        }
+
+        _positionSlider.Value = 0;
+        _playButton.Text = "再生";
+        UpdateTimeLabel();
+    }
+
+    private async Task ToggleContinuousPlaybackAsync()
+    {
+        _continuousPlayback = !_continuousPlayback;
+        UpdateContinuousButton();
+
+        var state = await _store.LoadAsync();
+        state.AudioContinuousPlayback = _continuousPlayback;
+        await _store.SaveAsync(state);
+    }
+
+    private void UpdateContinuousButton()
+    {
+        _continuousButton.Text = _continuousPlayback ? "連続 ON" : "連続 OFF";
+        _continuousButton.BackgroundColor = _continuousPlayback
+            ? Color.FromArgb("#21423D")
+            : Color.FromArgb("#172029");
     }
 
     private async Task MoveAsync(int delta)

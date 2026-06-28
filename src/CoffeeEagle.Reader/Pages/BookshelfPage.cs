@@ -195,6 +195,7 @@ public sealed class BookshelfPage : ContentPage
         try
         {
             _state = await _store.LoadAsync();
+            _state.Libraries = EagleLibraryIdentity.Deduplicate(_state.Libraries, _state.ActiveLibraryId);
             _libraries.Clear();
             _libraries.AddRange(_state.Libraries);
             _activeLibrary = _libraries.FirstOrDefault(library =>
@@ -299,7 +300,12 @@ public sealed class BookshelfPage : ContentPage
             }
         }
 
-        var existing = _libraries.FirstOrDefault(library => string.Equals(library.TreeUri, GoogleDriveLibraryService.BuildFolderUri(folderId), StringComparison.Ordinal));
+        var existingIndex = EagleLibraryIdentity.FindMatchingIndex(
+            _libraries,
+            GoogleDriveLibraryService.BuildFolderUri(folderId),
+            EagleLibrarySourceKind.GoogleDriveApi,
+            folderId);
+        var existing = existingIndex >= 0 ? _libraries[existingIndex] : null;
         await IndexGoogleDriveApiLibraryAsync(existing);
     }
     private async Task RefreshActiveLibraryAsync()
@@ -332,17 +338,7 @@ public sealed class BookshelfPage : ContentPage
         try
         {
             var library = await _drive.IndexAsync(_state, previous, progress);
-            var existingIndex = _libraries.FindIndex(item =>
-                string.Equals(item.Id, library.Id, StringComparison.Ordinal)
-                || string.Equals(item.TreeUri, library.TreeUri, StringComparison.Ordinal));
-            if (existingIndex >= 0)
-            {
-                _libraries[existingIndex] = library;
-            }
-            else
-            {
-                _libraries.Insert(0, library);
-            }
+            UpsertLibrary(library);
 
             _activeLibrary = library;
             _state.ActiveLibraryId = library.Id;
@@ -376,6 +372,7 @@ public sealed class BookshelfPage : ContentPage
             SetBusy(false);
         }
     }
+
     private async Task IndexLibraryAsync(string treeUri, EagleLibrary? previous)
     {
         if (_isBusy)
@@ -388,17 +385,7 @@ public sealed class BookshelfPage : ContentPage
         try
         {
             var library = await _indexer.IndexAsync(treeUri, previous, progress);
-            var existingIndex = _libraries.FindIndex(item =>
-                string.Equals(item.Id, library.Id, StringComparison.Ordinal)
-                || string.Equals(item.TreeUri, library.TreeUri, StringComparison.Ordinal));
-            if (existingIndex >= 0)
-            {
-                _libraries[existingIndex] = library;
-            }
-            else
-            {
-                _libraries.Insert(0, library);
-            }
+            UpsertLibrary(library);
 
             _activeLibrary = library;
             _state.ActiveLibraryId = library.Id;
@@ -420,6 +407,23 @@ public sealed class BookshelfPage : ContentPage
         {
             SetBusy(false);
         }
+    }
+
+    private void UpsertLibrary(EagleLibrary library)
+    {
+        var existingIndex = EagleLibraryIdentity.FindMatchingIndex(_libraries, library);
+        if (existingIndex >= 0)
+        {
+            _libraries[existingIndex] = library;
+        }
+        else
+        {
+            _libraries.Insert(0, library);
+        }
+
+        var deduplicated = EagleLibraryIdentity.Deduplicate(_libraries, library.Id);
+        _libraries.Clear();
+        _libraries.AddRange(deduplicated);
     }
 
     private async Task ShowLibraryMenuAsync()

@@ -110,6 +110,8 @@ public sealed class EagleLibraryStore
             }
         }
 
+        state.Libraries = EagleLibraryIdentity.Deduplicate(state.Libraries, state.ActiveLibraryId);
+
         if (state.ActiveLibraryId is not null
             && state.Libraries.All(library => !string.Equals(library.Id, state.ActiveLibraryId, StringComparison.Ordinal)))
         {

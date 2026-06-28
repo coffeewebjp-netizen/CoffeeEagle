@@ -191,7 +191,7 @@ public sealed class EagleLibraryIndexer
             return;
         }
 
-        progress?.Report($"mtime差分を確認中... missing {missingIds.Count}");
+        progress?.Report($"mtime差分を確認中... unresolved {missingIds.Count}");
         foreach (var assetId in missingIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -391,9 +391,16 @@ public sealed class EagleLibraryIndexer
 
         public string ToMessage()
         {
-            var mtimeMessage = MtimeFound
-                ? $", mtime {(MtimeDeclaredTotal > 0 ? MtimeDeclaredTotal : MtimeAssetIds)}, missing {MtimeMissingIds}, recovered {MtimeRecoveredIds}, direct-hit {MtimeDirectHits}, direct-fail {MtimeDirectFailures}"
-                : ", mtime none";
+            var mtimeMessage = ", mtime none";
+            if (MtimeFound)
+            {
+                var mtimeTotal = MtimeDeclaredTotal > 0 ? MtimeDeclaredTotal : MtimeAssetIds;
+                var unresolved = Math.Max(0, MtimeMissingIds - MtimeRecoveredIds);
+                mtimeMessage = unresolved > 0 || MtimeRecoveredIds > 0
+                    ? $", mtime {mtimeTotal}, unresolved {unresolved}, recovered {MtimeRecoveredIds}"
+                    : $", mtime {mtimeTotal}, ok";
+            }
+
             if (MtimeReadFailed)
             {
                 mtimeMessage += ", mtime-read-fail";

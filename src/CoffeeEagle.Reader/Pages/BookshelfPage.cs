@@ -644,7 +644,7 @@ public sealed class BookshelfPage : ContentPage
         }
 
         return library.Assets.Count == 0
-            || library.IndexMessage.Contains("missing", StringComparison.OrdinalIgnoreCase)
+            || library.IndexMessage.Contains("unresolved", StringComparison.OrdinalIgnoreCase)
             || library.IndexMessage.Contains("recovered", StringComparison.OrdinalIgnoreCase)
             || library.IndexMessage.Contains("read-fail", StringComparison.OrdinalIgnoreCase);
     }

@@ -109,7 +109,7 @@ public sealed class GoogleDriveLibraryService
 
     public async Task AuthorizeWithBrowserAsync(
         EagleReaderState state,
-        IProgress<string>? progress = null,
+        IProgress<LibrarySyncProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(state.GoogleDriveClientId))
@@ -121,7 +121,7 @@ public sealed class GoogleDriveLibraryService
         var codeChallenge = CreateCodeChallenge(codeVerifier);
         var authUri = CreateAuthorizationUri(state.GoogleDriveClientId, codeChallenge);
 
-        progress?.Report("Googleログインを開いています...");
+        progress?.Report(new LibrarySyncProgress("Googleログインを開いています", "Google OAuth", Detail: "accounts.google.com"));
         var result = await WebAuthenticator.Default.AuthenticateAsync(authUri, new Uri(BrowserRedirectUri));
         if (!result.Properties.TryGetValue("code", out var code) || string.IsNullOrWhiteSpace(code))
         {
@@ -130,7 +130,7 @@ public sealed class GoogleDriveLibraryService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report("Google認証トークンを取得しています...");
+        progress?.Report(new LibrarySyncProgress("認証トークンを取得中", "OAuthアクセストークン", Detail: "oauth2.googleapis.com"));
         var form = new Dictionary<string, string>
         {
             ["client_id"] = state.GoogleDriveClientId,
@@ -208,7 +208,8 @@ public sealed class GoogleDriveLibraryService
     public async Task<EagleLibrary> IndexAsync(
         EagleReaderState state,
         EagleLibrary? previous = null,
-        IProgress<string>? progress = null,
+        IProgress<LibrarySyncProgress>? progress = null,
+        bool allowAssetReuse = true,
         CancellationToken cancellationToken = default)
     {
         var folderId = ExtractFolderId(state.GoogleDriveFolderId ?? string.Empty);
@@ -217,7 +218,9 @@ public sealed class GoogleDriveLibraryService
             throw new InvalidOperationException("Google DriveのEAGLE .libraryフォルダIDが未設定です。");
         }
 
+        progress?.Report(new LibrarySyncProgress("ライブラリ情報を取得中", folderId, Detail: "Drive files.get"));
         var root = await GetFileAsync(state, folderId, cancellationToken);
+        progress?.Report(new LibrarySyncProgress("ルート一覧を取得中", root.Name, Detail: "Drive files.list"));
         var rootChildren = await ListChildrenAsync(state, folderId, cancellationToken);
         var rootMetadata = rootChildren.FirstOrDefault(IsMetadataFile);
         var mtimeEntry = rootChildren.FirstOrDefault(entry => !entry.IsFolder && string.Equals(entry.Name, "mtime.json", StringComparison.OrdinalIgnoreCase));
@@ -231,16 +234,26 @@ public sealed class GoogleDriveLibraryService
         var folders = new List<EagleFolder>();
         if (rootMetadata is not null)
         {
-            progress?.Report("Drive APIでフォルダ情報を読み込み中...");
+            progress?.Report(new LibrarySyncProgress("フォルダー構成を取得中", rootMetadata.Name, Detail: "ライブラリmetadata.json"));
             using var metadata = await OpenJsonDocumentAsync(state, rootMetadata.Id, cancellationToken);
             libraryName = ReadString(metadata.RootElement, "name", "title", "libraryName") ?? libraryName;
             folders.AddRange(ReadFolders(metadata.RootElement));
         }
 
         NormalizeFolderPaths(folders);
+        if (mtimeEntry is not null)
+        {
+            progress?.Report(new LibrarySyncProgress("更新一覧を取得中", mtimeEntry.Name, Detail: "変更件数を確認"));
+        }
+
         var mtimeIndex = await ReadMtimeIndexAsync(state, mtimeEntry, cancellationToken);
-        progress?.Report("Drive APIでメディア情報を索引化中...");
-        var scan = await ScanAssetsAsync(state, imagesDirectory.Id, mtimeIndex, previous, progress, cancellationToken);
+        progress?.Report(new LibrarySyncProgress(
+            "変更対象を探索中",
+            imagesDirectory.Name,
+            0,
+            null,
+            "Drive APIで.info一覧を取得"));
+        var scan = await ScanAssetsAsync(state, imagesDirectory.Id, mtimeIndex, previous, allowAssetReuse, progress, cancellationToken);
         EnsureReferencedFolders(folders, scan.Assets);
         NormalizeFolderPaths(folders);
 
@@ -254,6 +267,8 @@ public sealed class GoogleDriveLibraryService
             RootDocumentId = folderId,
             IndexMessage = scan.ToMessage(),
             IndexedAt = DateTimeOffset.UtcNow,
+            IndexFormatVersion = EagleLibrary.CurrentIndexFormatVersion,
+            SourceIndexModifiedStamp = mtimeIndex.ModifiedStamp,
             Folders = folders
                 .OrderBy(folder => folder.Path, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(folder => folder.Name, StringComparer.CurrentCultureIgnoreCase)
@@ -261,6 +276,9 @@ public sealed class GoogleDriveLibraryService
             Assets = scan.Assets
                 .OrderByDescending(asset => asset.ModifiedAt ?? asset.CreatedAt ?? DateTimeOffset.MinValue)
                 .ThenBy(asset => asset.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList(),
+            SourceEntries = scan.SourceEntries
+                .OrderBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)
                 .ToList()
         };
     }
@@ -270,7 +288,8 @@ public sealed class GoogleDriveLibraryService
         string imagesFolderId,
         MtimeIndex mtimeIndex,
         EagleLibrary? previous,
-        IProgress<string>? progress,
+        bool allowAssetReuse,
+        IProgress<LibrarySyncProgress>? progress,
         CancellationToken cancellationToken)
     {
         var scan = new AssetScanResult
@@ -280,24 +299,45 @@ public sealed class GoogleDriveLibraryService
             MtimeAssetIds = mtimeIndex.AssetModifiedAt.Count,
             MtimeDeclaredTotal = mtimeIndex.DeclaredTotal
         };
+        var canUsePreviousIndex = previous is not null
+            && previous.IndexFormatVersion == EagleLibrary.CurrentIndexFormatVersion;
+        var previousEntries = canUsePreviousIndex
+            ? CreatePreviousSourceEntryLookup(previous)
+            : new Dictionary<string, EagleSourceEntry>(StringComparer.OrdinalIgnoreCase);
         var previousAssets = CreatePreviousAssetLookup(previous);
-        var seenInfoIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var pendingFolders = new Queue<string>();
-        pendingFolders.Enqueue(imagesFolderId);
+        var sourceIndexUnchanged = canUsePreviousIndex
+            && mtimeIndex.ModifiedStamp > 0
+            && previous!.SourceIndexModifiedStamp == mtimeIndex.ModifiedStamp;
+        var infoDirectories = new Dictionary<string, DriveEntry>(StringComparer.OrdinalIgnoreCase);
+        var pendingFolders = new Queue<(string Id, string Name)>();
+        pendingFolders.Enqueue((imagesFolderId, "images"));
 
+        // The physical .info list is authoritative for existence. mtime.json is only a
+        // change hint and is intentionally not used to exclude directories from this scan.
         while (pendingFolders.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var folderId = pendingFolders.Dequeue();
+            var folder = pendingFolders.Dequeue();
             scan.VisitedDirectories++;
+            progress?.Report(new LibrarySyncProgress(
+                "変更対象を探索中",
+                folder.Name,
+                0,
+                infoDirectories.Count > 0 ? infoDirectories.Count : null,
+                $"発見 .info {infoDirectories.Count:N0} / 確認済みフォルダー {scan.VisitedDirectories:N0}"));
             IReadOnlyList<DriveEntry> children;
             try
             {
-                children = await ListChildrenAsync(state, folderId, cancellationToken);
+                children = await ListChildrenAsync(state, folder.Id, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
                 scan.DirectoryReadFailures++;
+                scan.DiscoveryReadFailures++;
                 continue;
             }
 
@@ -310,141 +350,170 @@ public sealed class GoogleDriveLibraryService
 
                 if (child.Name.EndsWith(".info", StringComparison.OrdinalIgnoreCase))
                 {
-                    scan.InfoDirectories++;
                     var infoId = TrimInfoSuffix(child.Name);
-                    seenInfoIds.Add(infoId);
-                    if (TryReusePreviousAsset(infoId, mtimeIndex, previousAssets, out var reusedAsset))
-                    {
-                        scan.ReusedAssets++;
-                        scan.Assets.Add(reusedAsset);
-                        ReportAssetProgress(scan.Assets.Count, scan.ReusedAssets, progress, "Drive APIで索引化中");
-                        continue;
-                    }
-
-                    var asset = await TryReadAssetAsync(state, child, scan, GetMtimeStamp(mtimeIndex, infoId), cancellationToken);
-                    if (asset is not null)
-                    {
-                        scan.Assets.Add(asset);
-                        ReportAssetProgress(scan.Assets.Count, scan.ReusedAssets, progress, "Drive APIで索引化中");
-                    }
+                    infoDirectories.TryAdd(infoId, child);
                 }
                 else
                 {
-                    pendingFolders.Enqueue(child.Id);
+                    if (IsEagleTrashDirectory(child.Name))
+                    {
+                        scan.TrashDirectories++;
+                        continue;
+                    }
+
+                    pendingFolders.Enqueue((child.Id, child.Name));
                 }
             }
         }
 
-        await RecoverMissingMtimeAssetsAsync(
-            state,
-            imagesFolderId,
-            mtimeIndex,
-            previousAssets,
-            seenInfoIds,
-            scan,
-            progress,
-            cancellationToken);
+        scan.InfoDirectories = infoDirectories.Count;
+        if (scan.DiscoveryReadFailures > 0)
+        {
+            throw new InvalidOperationException(".info一覧の一部を取得できなかったため、安全のため更新を中止しました。通信状態を確認して再試行してください。");
+        }
 
-        progress?.Report(scan.ToMessage());
+        scan.MtimeMissingIds = mtimeIndex.AssetModifiedAt.Keys.Count(id => !infoDirectories.ContainsKey(id));
+        var removedEntries = previousEntries.Values
+            .Where(entry => !infoDirectories.ContainsKey(entry.SourceInfoId))
+            .OrderBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var total = infoDirectories.Count + removedEntries.Count;
+        progress?.Report(new LibrarySyncProgress(
+            "差分を確認中",
+            "images",
+            0,
+            total,
+            $"発見 .info {infoDirectories.Count:N0} / 物理消失 {removedEntries.Count:N0}"));
+
+        foreach (var pair in infoDirectories.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var infoId = pair.Key;
+            var sourceModifiedStamp = GetMtimeStamp(mtimeIndex, infoId);
+            previousEntries.TryGetValue(infoId, out var previousEntry);
+            previousAssets.TryGetValue(infoId, out var previousAsset);
+
+            if (allowAssetReuse
+                && !mtimeIndex.ReadFailed
+                && previousEntry is not null
+                && ((sourceModifiedStamp > 0 && previousEntry.SourceModifiedStamp == sourceModifiedStamp)
+                    || (sourceModifiedStamp == 0 && sourceIndexUnchanged)))
+            {
+                if (string.Equals(previousEntry.State, EagleSourceEntryState.Active, StringComparison.Ordinal)
+                    && previousAsset is not null)
+                {
+                    var reusedAsset = CloneAsset(previousAsset);
+                    reusedAsset.SourceInfoId = infoId;
+                    reusedAsset.SourceModifiedStamp = sourceModifiedStamp;
+                    scan.Assets.Add(reusedAsset);
+                    scan.SourceEntries.Add(CreateSourceEntry(infoId, sourceModifiedStamp, EagleSourceEntryState.Active));
+                    scan.ReusedAssets++;
+                    scan.Unchanged++;
+                    scan.Processed++;
+                    ReportAssetProgress(scan, total, progress, pair.Value.Name);
+                    continue;
+                }
+
+                if (string.Equals(previousEntry.State, EagleSourceEntryState.Deleted, StringComparison.Ordinal))
+                {
+                    scan.SourceEntries.Add(CreateSourceEntry(infoId, sourceModifiedStamp, EagleSourceEntryState.Deleted));
+                    scan.ReusedAssets++;
+                    scan.Unchanged++;
+                    scan.Processed++;
+                    ReportAssetProgress(scan, total, progress, pair.Value.Name);
+                    continue;
+                }
+            }
+
+            var result = await TryReadAssetAsync(
+                state,
+                pair.Value,
+                scan,
+                sourceModifiedStamp,
+                cancellationToken);
+            scan.SourceEntries.Add(CreateSourceEntry(infoId, sourceModifiedStamp, result.State));
+            if (result.Asset is not null)
+            {
+                scan.Assets.Add(result.Asset);
+            }
+            else if (IsTemporaryReadState(result.State) && previousAsset is not null)
+            {
+                var retainedAsset = CloneAsset(previousAsset);
+                retainedAsset.SourceInfoId = infoId;
+                scan.Assets.Add(retainedAsset);
+                scan.RetainedAssets++;
+            }
+
+            if (IsTemporaryReadState(result.State))
+            {
+                scan.Retry++;
+            }
+            else if (string.Equals(result.State, EagleSourceEntryState.Active, StringComparison.Ordinal))
+            {
+                if (previousAsset is null)
+                {
+                    scan.Added++;
+                }
+                else
+                {
+                    scan.Changed++;
+                }
+            }
+            else if (string.Equals(result.State, EagleSourceEntryState.Deleted, StringComparison.Ordinal)
+                && previousAsset is not null)
+            {
+                scan.Deleted++;
+            }
+
+            scan.Processed++;
+            ReportAssetProgress(scan, total, progress, pair.Value.Name);
+        }
+
+        foreach (var previousEntry in removedEntries)
+        {
+            if (previousAssets.ContainsKey(previousEntry.SourceInfoId))
+            {
+                scan.Deleted++;
+            }
+
+            scan.Processed++;
+            ReportAssetProgress(scan, total, progress, previousEntry.SourceInfoId + ".info");
+        }
+
+        var completed = total == 0 ? 1 : scan.Processed;
+        var progressTotal = total == 0 ? 1 : total;
+        progress?.Report(new LibrarySyncProgress(
+            "更新完了",
+            "images",
+            completed,
+            progressTotal,
+            scan.ToDifferenceMessage()));
         return scan;
     }
 
-    private async Task RecoverMissingMtimeAssetsAsync(
-        EagleReaderState state,
-        string imagesFolderId,
-        MtimeIndex mtimeIndex,
-        IReadOnlyDictionary<string, EagleAsset> previousAssets,
-        HashSet<string> seenInfoIds,
-        AssetScanResult scan,
-        IProgress<string>? progress,
-        CancellationToken cancellationToken)
+    private static bool IsEagleTrashDirectory(string name)
     {
-        if (mtimeIndex.AssetModifiedAt.Count == 0)
-        {
-            return;
-        }
-
-        var missingIds = mtimeIndex.AssetModifiedAt.Keys
-            .Where(id => !seenInfoIds.Contains(id))
-            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        scan.MtimeMissingIds = missingIds.Count;
-        if (missingIds.Count == 0)
-        {
-            return;
-        }
-
-        progress?.Report($"Drive APIでmtime差分を確認中... unresolved {missingIds.Count}");
-        foreach (var assetId in missingIds)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (TryReusePreviousAsset(assetId, mtimeIndex, previousAssets, out var reusedAsset))
-            {
-                scan.ReusedAssets++;
-                scan.Assets.Add(reusedAsset);
-                scan.MtimeRecoveredIds++;
-                continue;
-            }
-
-            DriveEntry? infoDirectory;
-            try
-            {
-                infoDirectory = await FindInfoDirectoryByIdAsync(state, imagesFolderId, assetId, cancellationToken);
-            }
-            catch
-            {
-                scan.MtimeDirectFailures++;
-                continue;
-            }
-
-            if (infoDirectory is null)
-            {
-                scan.MtimeDirectFailures++;
-                continue;
-            }
-
-            scan.MtimeDirectHits++;
-            scan.InfoDirectories++;
-            seenInfoIds.Add(assetId);
-            var asset = await TryReadAssetAsync(state, infoDirectory, scan, GetMtimeStamp(mtimeIndex, assetId), cancellationToken);
-            if (asset is not null)
-            {
-                scan.Assets.Add(asset);
-                scan.MtimeRecoveredIds++;
-            }
-        }
+        var normalized = name.Trim().Trim('.', '_', '-').Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        return normalized is "trash" or "trashed" or "recycle" or "recycled" or "recyclebin" or "deleted" or "deleteditems";
     }
 
-    private async Task<DriveEntry?> FindInfoDirectoryByIdAsync(
-        EagleReaderState state,
-        string imagesFolderId,
-        string assetId,
-        CancellationToken cancellationToken)
+    private static Dictionary<string, EagleSourceEntry> CreatePreviousSourceEntryLookup(EagleLibrary? previous)
     {
-        var infoName = assetId.EndsWith(".info", StringComparison.OrdinalIgnoreCase)
-            ? assetId
-            : assetId + ".info";
-        var query = $"'{EscapeDriveQueryValue(imagesFolderId)}' in parents and name = '{EscapeDriveQueryValue(infoName)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
-        var accessToken = await GetValidAccessTokenAsync(state, cancellationToken);
-        var url = $"{DriveFilesUrl}?pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size,modifiedTime,createdTime)&q={Uri.EscapeDataString(query)}";
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var lookup = new Dictionary<string, EagleSourceEntry>(StringComparer.OrdinalIgnoreCase);
+        if (previous?.SourceEntries is null)
         {
-            throw new InvalidOperationException($"Google Drive .infoフォルダの直接検索に失敗しました: {GetErrorMessage(body)}");
+            return lookup;
         }
 
-        using var document = JsonDocument.Parse(body);
-        return document.RootElement.TryGetProperty("files", out var files) && files.ValueKind == JsonValueKind.Array
-            ? files.EnumerateArray().Select(ReadDriveEntry).FirstOrDefault(entry => entry.IsFolder)
-            : null;
-    }
+        foreach (var entry in previous.SourceEntries)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.SourceInfoId) && !lookup.ContainsKey(entry.SourceInfoId))
+            {
+                lookup[entry.SourceInfoId] = entry;
+            }
+        }
 
-    private static string EscapeDriveQueryValue(string value)
-    {
-        return value.Replace("\\", "\\\\").Replace("'", "\\'");
+        return lookup;
     }
 
     private static Dictionary<string, EagleAsset> CreatePreviousAssetLookup(EagleLibrary? previous)
@@ -472,27 +541,20 @@ public sealed class GoogleDriveLibraryService
         }
     }
 
-    private static bool TryReusePreviousAsset(
-        string infoId,
-        MtimeIndex mtimeIndex,
-        IReadOnlyDictionary<string, EagleAsset> previousAssets,
-        out EagleAsset asset)
+    private static EagleSourceEntry CreateSourceEntry(string infoId, long sourceModifiedStamp, string state)
     {
-        asset = null!;
-        if (!mtimeIndex.Found
-            || mtimeIndex.ReadFailed
-            || !mtimeIndex.AssetModifiedAt.TryGetValue(infoId, out var sourceModifiedStamp)
-            || sourceModifiedStamp <= 0
-            || !previousAssets.TryGetValue(infoId, out var previous)
-            || previous.SourceModifiedStamp != sourceModifiedStamp)
+        return new EagleSourceEntry
         {
-            return false;
-        }
+            SourceInfoId = infoId,
+            SourceModifiedStamp = sourceModifiedStamp,
+            State = state
+        };
+    }
 
-        asset = CloneAsset(previous);
-        asset.SourceInfoId = string.IsNullOrWhiteSpace(asset.SourceInfoId) ? infoId : asset.SourceInfoId;
-        asset.SourceModifiedStamp = sourceModifiedStamp;
-        return true;
+    private static bool IsTemporaryReadState(string state)
+    {
+        return string.Equals(state, EagleSourceEntryState.MissingMetadata, StringComparison.Ordinal)
+            || string.Equals(state, EagleSourceEntryState.ReadFailed, StringComparison.Ordinal);
     }
 
     private static EagleAsset CloneAsset(EagleAsset source)
@@ -527,15 +589,24 @@ public sealed class GoogleDriveLibraryService
             : 0;
     }
 
-    private static void ReportAssetProgress(int assetCount, int reusedAssets, IProgress<string>? progress, string message)
+    private static void ReportAssetProgress(
+        AssetScanResult scan,
+        int total,
+        IProgress<LibrarySyncProgress>? progress,
+        string target)
     {
-        if (assetCount > 0 && assetCount % 50 == 0)
+        if (scan.Processed == 1 || scan.Processed == total || scan.Processed % 10 == 0)
         {
-            progress?.Report($"{assetCount} 件を{message}... reused {reusedAssets}");
+            progress?.Report(new LibrarySyncProgress(
+                "差分を更新中",
+                target,
+                scan.Processed,
+                total,
+                scan.ToDifferenceMessage()));
         }
     }
 
-    private async Task<EagleAsset?> TryReadAssetAsync(
+    private async Task<AssetReadResult> TryReadAssetAsync(
         EagleReaderState state,
         DriveEntry infoDirectory,
         AssetScanResult scan,
@@ -547,17 +618,21 @@ public sealed class GoogleDriveLibraryService
         {
             children = await ListChildrenAsync(state, infoDirectory.Id, cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch
         {
             scan.DirectoryReadFailures++;
-            return null;
+            return new AssetReadResult(null, EagleSourceEntryState.ReadFailed);
         }
 
         var metadataEntry = children.FirstOrDefault(IsMetadataFile);
         if (metadataEntry is null)
         {
             scan.MetadataMissing++;
-            return null;
+            return new AssetReadResult(null, EagleSourceEntryState.MissingMetadata);
         }
 
         scan.MetadataFiles++;
@@ -565,6 +640,16 @@ public sealed class GoogleDriveLibraryService
         {
             using var metadata = await OpenJsonDocumentAsync(state, metadataEntry.Id, cancellationToken);
             var root = metadata.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException("metadata.json must contain a JSON object.");
+            }
+
+            if (ReadBoolean(root, "isDeleted"))
+            {
+                return new AssetReadResult(null, EagleSourceEntryState.Deleted);
+            }
+
             var files = children.Where(child => !child.IsFolder && !IsMetadataFile(child)).ToList();
             var imageFiles = files.Where(IsImageFile).ToList();
             var mediaFiles = files.Where(IsSupportedMediaFile).ToList();
@@ -583,32 +668,38 @@ public sealed class GoogleDriveLibraryService
                 ?? TrimInfoSuffix(infoDirectory.Name);
             var extension = NormalizeExtension(ReadString(root, "ext", "extension") ?? Path.GetExtension(fileName));
 
-            return new EagleAsset
-            {
-                Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id,
-                Name = string.IsNullOrWhiteSpace(name) ? TrimInfoSuffix(infoDirectory.Name) : name,
-                FileName = fileName,
-                Extension = extension,
-                FileUri = primaryFile is null ? thumbnail is null ? null : BuildFileUri(thumbnail.Id, thumbnail.Name) : BuildFileUri(primaryFile.Id, primaryFile.Name),
-                ThumbnailUri = thumbnail is null ? mediaKind == EagleAssetMediaKind.Image && primaryFile is not null ? BuildFileUri(primaryFile.Id, primaryFile.Name) : null : BuildFileUri(thumbnail.Id, thumbnail.Name),
-                MediaKind = mediaKind,
-                SourceInfoId = TrimInfoSuffix(infoDirectory.Name),
-                SourceModifiedStamp = sourceModifiedStamp,
-                FolderIds = ReadStringArray(root, "folders", "folderIds", "folderId").Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                Tags = ReadStringArray(root, "tags", "tagNames").Distinct(StringComparer.CurrentCultureIgnoreCase).OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase).ToList(),
-                SourceUrl = ReadString(root, "url", "source", "sourceUrl"),
-                Annotation = ReadString(root, "annotation", "note", "description"),
-                SizeBytes = primaryFile?.Size ?? thumbnail?.Size ?? ReadLong(root, "size", "sizeBytes"),
-                Width = (int)ReadLong(root, "width"),
-                Height = (int)ReadLong(root, "height"),
-                CreatedAt = ReadDate(root, "btime", "createdAt", "createTime", "birthTime") ?? infoDirectory.CreatedAt,
-                ModifiedAt = ReadDate(root, "mtime", "modifiedAt", "modificationTime", "updatedAt") ?? primaryFile?.ModifiedAt ?? infoDirectory.ModifiedAt
-            };
+            return new AssetReadResult(
+                new EagleAsset
+                {
+                    Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id,
+                    Name = string.IsNullOrWhiteSpace(name) ? TrimInfoSuffix(infoDirectory.Name) : name,
+                    FileName = fileName,
+                    Extension = extension,
+                    FileUri = primaryFile is null ? thumbnail is null ? null : BuildFileUri(thumbnail.Id, thumbnail.Name) : BuildFileUri(primaryFile.Id, primaryFile.Name),
+                    ThumbnailUri = thumbnail is null ? mediaKind == EagleAssetMediaKind.Image && primaryFile is not null ? BuildFileUri(primaryFile.Id, primaryFile.Name) : null : BuildFileUri(thumbnail.Id, thumbnail.Name),
+                    MediaKind = mediaKind,
+                    SourceInfoId = TrimInfoSuffix(infoDirectory.Name),
+                    SourceModifiedStamp = sourceModifiedStamp,
+                    FolderIds = ReadStringArray(root, "folders", "folderIds", "folderId").Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    Tags = ReadStringArray(root, "tags", "tagNames").Distinct(StringComparer.CurrentCultureIgnoreCase).OrderBy(tag => tag, StringComparer.CurrentCultureIgnoreCase).ToList(),
+                    SourceUrl = ReadString(root, "url", "source", "sourceUrl"),
+                    Annotation = ReadString(root, "annotation", "note", "description"),
+                    SizeBytes = primaryFile?.Size ?? thumbnail?.Size ?? ReadLong(root, "size", "sizeBytes"),
+                    Width = (int)ReadLong(root, "width"),
+                    Height = (int)ReadLong(root, "height"),
+                    CreatedAt = ReadDate(root, "btime", "createdAt", "createTime", "birthTime") ?? infoDirectory.CreatedAt,
+                    ModifiedAt = ReadDate(root, "mtime", "modifiedAt", "modificationTime", "updatedAt") ?? primaryFile?.ModifiedAt ?? infoDirectory.ModifiedAt
+                },
+                EagleSourceEntryState.Active);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
             scan.AssetReadFailures++;
-            return null;
+            return new AssetReadResult(null, EagleSourceEntryState.ReadFailed);
         }
     }
     private async Task<IReadOnlyList<DriveEntry>> ListChildrenAsync(EagleReaderState state, string folderId, CancellationToken cancellationToken)
@@ -693,10 +784,11 @@ public sealed class GoogleDriveLibraryService
         {
             var assets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var declaredTotal = 0;
+            var modifiedStamp = entry.ModifiedAt?.ToUnixTimeMilliseconds() ?? 0;
             using var document = await OpenJsonDocumentAsync(state, entry.Id, cancellationToken);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                return new MtimeIndex(true, true, assets, 0);
+                return new MtimeIndex(true, true, assets, 0, modifiedStamp);
             }
 
             foreach (var property in document.RootElement.EnumerateObject())
@@ -710,15 +802,24 @@ public sealed class GoogleDriveLibraryService
                 var mtime = ReadLongValue(property.Value);
                 if (!string.IsNullOrWhiteSpace(property.Name) && mtime > 0)
                 {
-                    assets[property.Name] = mtime;
+                    assets[TrimInfoSuffix(property.Name)] = mtime;
                 }
             }
 
-            return new MtimeIndex(true, false, assets, declaredTotal);
+            return new MtimeIndex(true, false, assets, declaredTotal, modifiedStamp);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
-            return new MtimeIndex(true, true, new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase), 0);
+            return new MtimeIndex(
+                true,
+                true,
+                new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase),
+                0,
+                entry.ModifiedAt?.ToUnixTimeMilliseconds() ?? 0);
         }
     }
 
@@ -1097,6 +1198,39 @@ public sealed class GoogleDriveLibraryService
         return ReadLongValue(property);
     }
 
+    private static bool ReadBoolean(JsonElement element, params string[] names)
+    {
+        if (!TryGetProperty(element, out var property, names))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.True)
+        {
+            return true;
+        }
+
+        if (property.ValueKind == JsonValueKind.False)
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var number))
+        {
+            return number != 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return bool.TryParse(value, out var boolean)
+                ? boolean
+                : long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out number) && number != 0;
+        }
+
+        return false;
+    }
+
     private static long ReadLongValue(JsonElement property)
     {
         if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var number))
@@ -1341,8 +1475,16 @@ public sealed class GoogleDriveLibraryService
     private sealed class AssetScanResult
     {
         public List<EagleAsset> Assets { get; } = [];
+        public List<EagleSourceEntry> SourceEntries { get; } = [];
+        public int Added { get; set; }
+        public int Changed { get; set; }
+        public int Deleted { get; set; }
+        public int Unchanged { get; set; }
+        public int Retry { get; set; }
+        public int Processed { get; set; }
         public int VisitedDirectories { get; set; }
         public int DirectoryReadFailures { get; set; }
+        public int DiscoveryReadFailures { get; set; }
         public int InfoDirectories { get; set; }
         public int MetadataFiles { get; set; }
         public int MetadataMissing { get; set; }
@@ -1350,14 +1492,18 @@ public sealed class GoogleDriveLibraryService
         public int MediaFiles { get; set; }
         public int AssetReadFailures { get; set; }
         public int ReusedAssets { get; set; }
+        public int RetainedAssets { get; set; }
         public bool MtimeFound { get; set; }
         public bool MtimeReadFailed { get; set; }
         public int MtimeAssetIds { get; set; }
         public int MtimeDeclaredTotal { get; set; }
         public int MtimeMissingIds { get; set; }
-        public int MtimeDirectHits { get; set; }
-        public int MtimeDirectFailures { get; set; }
-        public int MtimeRecoveredIds { get; set; }
+        public int TrashDirectories { get; set; }
+
+        public string ToDifferenceMessage()
+        {
+            return $"追加 {Added:N0} / 変更 {Changed:N0} / 削除 {Deleted:N0} / 変更なし {Unchanged:N0} / 再試行 {Retry:N0} / 一時保持 {RetainedAssets:N0}";
+        }
 
         public string ToMessage()
         {
@@ -1365,9 +1511,8 @@ public sealed class GoogleDriveLibraryService
             if (MtimeFound)
             {
                 var mtimeTotal = MtimeDeclaredTotal > 0 ? MtimeDeclaredTotal : MtimeAssetIds;
-                var unresolved = Math.Max(0, MtimeMissingIds - MtimeRecoveredIds);
-                mtimeMessage = unresolved > 0 || MtimeRecoveredIds > 0
-                    ? $", mtime {mtimeTotal}, unresolved {unresolved}, recovered {MtimeRecoveredIds}"
+                mtimeMessage = MtimeMissingIds > 0
+                    ? $", mtime {mtimeTotal}, hints {MtimeAssetIds}, not-found {MtimeMissingIds}"
                     : $", mtime {mtimeTotal}, ok";
             }
 
@@ -1376,13 +1521,26 @@ public sealed class GoogleDriveLibraryService
                 mtimeMessage += ", mtime-read-fail";
             }
 
-            return $"{Assets.Count} 件をDrive APIで索引化 / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, reused {ReusedAssets}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}{mtimeMessage}";
+            var trashMessage = TrashDirectories > 0 ? $", trash {TrashDirectories}" : string.Empty;
+            return $"{Assets.Count} 件をDrive APIで索引化 / {ToDifferenceMessage()} / dirs {VisitedDirectories}, .info {InfoDirectories}, metadata {MetadataFiles}, reused {ReusedAssets}, images {ImageFiles}, media {MediaFiles}, read-fail {DirectoryReadFailures + AssetReadFailures}, metadata-missing {MetadataMissing}{mtimeMessage}{trashMessage}";
         }
     }
 
-    private sealed record MtimeIndex(bool Found, bool ReadFailed, IReadOnlyDictionary<string, long> AssetModifiedAt, int DeclaredTotal)
+    private sealed record AssetReadResult(EagleAsset? Asset, string State);
+
+    private sealed record MtimeIndex(
+        bool Found,
+        bool ReadFailed,
+        IReadOnlyDictionary<string, long> AssetModifiedAt,
+        int DeclaredTotal,
+        long ModifiedStamp)
     {
-        public static MtimeIndex Empty { get; } = new(false, false, new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase), 0);
+        public static MtimeIndex Empty { get; } = new(
+            false,
+            false,
+            new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase),
+            0,
+            0);
     }
 
     private sealed record DriveEntry(string Id, string Name, string MimeType, long Size, DateTimeOffset? CreatedAt, DateTimeOffset? ModifiedAt)

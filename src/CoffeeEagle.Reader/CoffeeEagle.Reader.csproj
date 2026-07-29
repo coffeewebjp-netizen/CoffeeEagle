@@ -11,10 +11,11 @@
     <MauiXamlInflator>SourceGen</MauiXamlInflator>
     <ApplicationTitle>CoffeeEagle</ApplicationTitle>
     <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
-    <ApplicationDisplayVersion>0.1.1</ApplicationDisplayVersion>
-    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.2</ApplicationDisplayVersion>
+    <ApplicationVersion>3</ApplicationVersion>
     <SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -37,7 +38,14 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.1" />
   </ItemGroup>
 
-  <Import Project="..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props" Condition="Exists('..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props')" />
+  <Import Project="$(CoffeeEagleSigningProps)" Condition="Exists('$(CoffeeEagleSigningProps)')" />
+
+  <Target
+    Name="RequireCoffeeEagleReleaseSigning"
+    BeforeTargets="PrepareForBuild"
+    Condition="'$(Configuration)' == 'Release' and !Exists('$(CoffeeEagleSigningProps)')">
+    <Error Text="CoffeeEagleの共通Release署名がありません。scripts\android\Restore-CoffeeEagleReaderSigning.ps1 で正本の署名ファイルを復元してください。新しい鍵を生成すると既存アプリを更新できません。" />
+  </Target>
 
 </Project>
 

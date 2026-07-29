@@ -68,6 +68,18 @@ public sealed class EagleImageSourceService
         await Task.CompletedTask;
     }
 
+    public async Task OpenVideoAsync(EagleAsset asset, CancellationToken cancellationToken = default)
+    {
+        var uri = asset.FileUri ?? asset.ThumbnailUri;
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            throw new InvalidOperationException("再生できる動画ファイルがありません。");
+        }
+
+        var playbackPath = await GetPlaybackPathAsync(asset, cancellationToken);
+        VideoPlayerActivity.Start(playbackPath, asset.Name, GoogleDriveLibraryService.IsDriveFileUri(uri));
+    }
+
     public ImageSource? CreateFullSource(EagleAsset asset)
     {
         return CreateContentSource(asset.FileUri ?? asset.ThumbnailUri);

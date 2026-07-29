@@ -4,10 +4,19 @@
     [string]$Alias = "coffeeeagle-reader-release",
     [string]$DName = "CN=CoffeeEagle Reader, O=CoffeeEagle, C=JP",
     [int]$ValidityDays = 10000,
+    [switch]$NewApplicationIdentity,
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $NewApplicationIdentity) {
+    throw @"
+このスクリプトは新しいAndroidアプリ署名を作るためのものです。
+既存のCoffeeEagleを更新する開発環境では実行せず、Restore-CoffeeEagleReaderSigning.ps1で共通鍵を復元してください。
+本当に別アプリIDとして新規作成する場合だけ -NewApplicationIdentity を指定してください。
+"@
+}
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 if ([string]::IsNullOrWhiteSpace($SigningDir)) {

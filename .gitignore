@@ -6,6 +6,11 @@ obj/
 
 # Local signing and tool caches
 .tools/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.Signing.props
 
 # IDE/user files
 .vs/

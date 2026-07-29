@@ -1,8 +1,11 @@
 ﻿# Google Drive Credentials
 
-CoffeeEagle の初期実装は Android の Storage Access Framework (SAF) と Google Drive Provider を使います。この経路では Google Cloud の OAuth クライアントは不要です。端末に入っている Google Drive アプリのフォルダ選択と Android の永続URI権限に任せます。
+CoffeeEagle は次の2経路をサポートします。
 
-Google Drive Provider で `.library` フォルダの再帰読み取りが安定しない場合だけ、Drive API + OAuth 方式へ切り替えます。その場合の登録手順をここに残します。
+- Android の Storage Access Framework (SAF) + Google Drive Provider
+- Google Drive API + OAuth + 明示フォルダID
+
+SAF経路ではGoogle CloudのOAuthクライアントは不要です。Drive API経路では、この文書に記載した登録済みAndroid OAuthクライアントを使います。
 
 ## 現在のアプリ情報
 
@@ -13,6 +16,18 @@ Google Drive Provider で `.library` フォルダの再帰読み取りが安定�
 - 署名 props: `.tools/android-signing/CoffeeEagle.Reader.Signing.props`
 
 `package name` と `SHA-1` は Google Cloud の Android OAuth クライアントに登録する値です。署名鍵を作り直すと SHA-1 が変わるため、同じクレデンシャルを使えなくなります。
+
+## アプリ更新時の再登録
+
+開発PC、アプリの表示バージョン、AndroidのversionCodeが変わっても、Google Cloud側の登録し直しは不要です。次の3点を維持します。
+
+- package nameを`net.coffeewebjp.coffeeeagle.reader`から変更しない
+- [Android署名手順](ANDROID_RELEASE.md)の共通Release署名を使い、SHA-1を変更しない
+- 登録済みOAuth client IDとリダイレクトURIを変更しない
+
+共通署名による上書きインストールでは、端末に保存したGoogle Driveのフォルダ設定と認証情報もそのまま引き継がれます。Google側で権限が取り消された場合や認証期限切れの場合は、アプリ内で再接続します。Google CloudプロジェクトやOAuthクライアントの再作成は不要です。
+
+再登録が必要になるのは、package nameまたは署名鍵を意図的に変更して別のアプリIDとして配布する場合だけです。
 
 ## Google Cloud 登録手順
 
@@ -36,11 +51,11 @@ Google Drive Provider で `.library` フォルダの再帰読み取りが安定�
 
 まずは `drive.file` を検討します。ただし、ユーザーが指定した既存の EAGLE `.library` フォルダを再帰的に読む用途では、権限不足になる可能性があります。その場合は `drive.readonly` が実装上は単純ですが、Google の restricted scope に該当するため、公開配布時は審査や説明が重くなります。
 
-当面の優先順位:
+利用方針:
 
-1. SAF + Google Drive Provider で読む。
-2. 足りない場合、Drive API + OAuth + 明示フォルダ指定へ切り替える。
-3. Drive API を使う場合も、索引作成は追加/更新時だけに限定し、通常操作では Drive API を叩かない。
+1. SAF + Google Drive Provider、またはDrive API + OAuth + 明示フォルダ指定でライブラリを追加する。
+2. Drive APIの索引作成は追加/更新時だけに限定し、通常の検索、タグ切り替え、閲覧では保存済み索引を使う。
+3. 2回目以降の更新は保存済み同期状態と`mtime.json`を照合し、追加・変更されたアセットだけを再取得する。
 
 ## 公式ドキュメント
 

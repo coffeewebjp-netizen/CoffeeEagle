@@ -1,69 +1,155 @@
-﻿# Android Release
+# Android Signing and Cross-PC Update
 
-CoffeeEagle は Android 専用アプリです。PC版は作らず、PC版 EAGLE が管理している `.library` を Android から読むビューアとして扱います。
+この文書を CoffeeEagle Reader のAndroid署名・更新手順の正本とする。
 
-## Release署名鍵
+## 目的
 
-Release APK は次の2ファイルを使って署名します。
+どの開発PCでも同じAndroidアプリとしてRelease APKを作り、端末内データを消さずに既存のCoffeeEagleを更新できる状態を維持する。
 
-- `.tools/android-signing/coffeeeagle-reader-release.jks`
-- `.tools/android-signing/CoffeeEagle.Reader.Signing.props`
+AndroidのアプリIDはpackage nameと署名証明書の組み合わせで決まる。署名が変わると上書き更新できず、アンインストールが必要になり、アプリ内のライブラリ設定や索引が消える可能性がある。
 
-`.tools/` は Git 管理外です。別PCや別開発環境に移る場合は、この2ファイルを同じパスへ復元してください。鍵を作り直すと Android は別署名アプリとして扱うため、インストール済みアプリを上書き更新できません。Google Cloud の Android OAuth クライアントに登録する SHA-1 も変わります。
+## 正本のアプリID
 
-初回だけ鍵を作る場合:
+- Package name: net.coffeewebjp.coffeeeagle.reader
+- Release署名 SHA-1: 15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
+- ApplicationDisplayVersion: 0.1.2
+- ApplicationVersion / Android versionCode: 3
 
-```powershell
-.\scripts\android\New-CoffeeEagleReaderKeystore.ps1
-```
+このpackage nameとSHA-1は既存の端末インストールおよびGoogle Cloud Android OAuth clientと一致する。変更しないこと。
 
-既存鍵がある状態で `-Force` を使うのは、署名を意図的に捨てる時だけです。
+## Gitだけでは完結しないもの
 
-## Build
+秘密鍵とパスワードは公開リポジトリへ入れない。次の2ファイルを暗号化バックアップ、秘密管理ストレージ、または安全な共有ドライブで別管理し、更新を行う各PCへ復元する。
 
-通常環境:
+~~~text
+coffeeeagle-reader-release.jks
+CoffeeEagle.Reader.Signing.props
+~~~
 
-```powershell
+リポジトリ内の復元先は次のとおり。
+
+~~~text
+.tools\android-signing\coffeeeagle-reader-release.jks
+.tools\android-signing\CoffeeEagle.Reader.Signing.props
+~~~
+
+.tools、*.jks、*.Signing.propsはGit管理外である。したがって「どのPCでも更新可能」とは、リポジトリのcloneに加えて正本の署名バックアップへアクセスできる開発環境を意味する。
+
+## 新しい開発PCの準備
+
+### 1. SDK / JDK
+
+ビルドは次の順序でAndroid SDKとJDKを探す。
+
+1. コマンド引数で指定したパス
+2. ANDROID_SDK_ROOT / ANDROID_HOME / JAVA_HOME
+3. このリポジトリの .tools
+4. 隣接する CoffeeBook\COFFEEBOOK\.tools
+5. ビルドスクリプト実行時はローカルのRed Hat Java拡張JRE
+
+推奨のリポジトリローカル配置:
+
+~~~text
+.tools\android-sdk\
+.tools\jdk-17\current\
+~~~
+
+通常の dotnet build でも [Directory.Build.props](../src/CoffeeEagle.Reader/Directory.Build.props) が上記の標準配置を自動解決する。特殊な配置では後述のビルドスクリプトにパスを渡す。
+
+### 2. 共通署名を復元
+
+正本2ファイルを置いた安全なフォルダを指定する。
+
+~~~powershell
+$env:COFFEE_EAGLE_SIGNING_SOURCE = "E:\secure\CoffeeEagle"
+.\scripts\android\Restore-CoffeeEagleReaderSigning.ps1
+~~~
+
+または:
+
+~~~powershell
+.\scripts\android\Restore-CoffeeEagleReaderSigning.ps1 -SourceDir "E:\secure\CoffeeEagle"
+~~~
+
+復元スクリプトは、署名props内のkeystoreパスを現在のclone先へ書き換え、証明書SHA-1が正本と一致する場合だけ保存する。
+
+すでに復元済みのファイルを置換する場合だけ -Force を使う。
+
+## ビルド
+
+推奨:
+
+~~~powershell
+.\scripts\android\Build-Install-CoffeeEagleReader.ps1
+~~~
+
+このスクリプトはRelease APKをビルドし、APK署名が正本SHA-1と一致することを検証する。
+
+直接ビルドする場合:
+
+~~~powershell
 dotnet build .\src\CoffeeEagle.Reader\CoffeeEagle.Reader.csproj -c Release -f net10.0-android
-```
+~~~
 
-この環境で確認済みの SDK/JDK 指定:
+共通署名がないReleaseビルドは、誤署名APKを作らないようプロジェクト側で失敗させる。
 
-```powershell
-dotnet build .\src\CoffeeEagle.Reader\CoffeeEagle.Reader.csproj -c Release -f net10.0-android -p:AndroidSdkDirectory="C:\work\CoffeeBook\COFFEEBOOK\.tools\android-sdk" -p:JavaSdkDirectory="C:\Users\coffe\.antigravity\extensions\redhat.java-1.54.0-win32-x64\jre\21.0.10-win32-x86_64"
-```
+特殊なツール配置:
+
+~~~powershell
+.\scripts\android\Build-Install-CoffeeEagleReader.ps1 -AndroidSdkDirectory "D:\Android\Sdk" -JavaSdkDirectory "D:\Java\jdk-17"
+~~~
 
 生成APK:
 
-```text
+~~~text
 src\CoffeeEagle.Reader\bin\Release\net10.0-android\net.coffeewebjp.coffeeeagle.reader-Signed.apk
-```
+~~~
 
-## Install
+## 端末へ安全に更新
 
-端末へ接続:
+接続が1台だけなら:
 
-```powershell
-& "C:\Users\coffe\Downloads\platform-tools-latest-windows\platform-tools\adb.exe" connect 192.168.1.15:44983
-```
+~~~powershell
+.\scripts\android\Build-Install-CoffeeEagleReader.ps1 -Install -Launch
+~~~
 
-インストール:
+複数のadb接続がある場合:
 
-```powershell
-& "C:\Users\coffe\Downloads\platform-tools-latest-windows\platform-tools\adb.exe" install -r ".\src\CoffeeEagle.Reader\bin\Release\net10.0-android\net.coffeewebjp.coffeeeagle.reader-Signed.apk"
-```
+~~~powershell
+.\scripts\android\Build-Install-CoffeeEagleReader.ps1 -Install -Launch -DeviceSerial "192.168.1.4:43547"
+~~~
 
-起動:
+スクリプトは adb install -r -d を使い、既存データを維持して更新する。署名が違う場合でも自動アンインストールはしない。
 
-```powershell
-& "C:\Users\coffe\Downloads\platform-tools-latest-windows\platform-tools\adb.exe" shell monkey -p net.coffeewebjp.coffeeeagle.reader -c android.intent.category.LAUNCHER 1
-```
+正式な更新ごとに ApplicationVersion を増やす。表示用リリース番号を変える場合は ApplicationDisplayVersion も更新する。
 
-## Version
+## やってはいけないこと
 
-現在値:
+- 他PCでDebug APKを作り、既存のRelease版へ上書きしない。
+- 署名不一致時に原因確認前のアンインストールをしない。
+- 既存アプリ更新用として新しいkeystoreを生成しない。
+- .toolsの署名ファイルやパスワードをGitへ追加しない。
 
-- `ApplicationDisplayVersion`: `0.1.1`
-- `ApplicationVersion`: `2`
+New-CoffeeEagleReaderKeystore.ps1 は別の新規アプリ署名を意図的に作る場合だけ、次の明示指定で実行できる。
 
-配布用に再インストールする時は、必要に応じて `ApplicationVersion` を増やします。同じ署名鍵を使っていれば、Android上で上書き更新できます。
+~~~powershell
+.\scripts\android\New-CoffeeEagleReaderKeystore.ps1 -NewApplicationIdentity
+~~~
+
+既存CoffeeEagleの更新環境では、必ず Restore-CoffeeEagleReaderSigning.ps1 を使用する。
+
+## 手動検証
+
+APKの証明書:
+
+~~~powershell
+keytool -printcert -jarfile .\src\CoffeeEagle.Reader\bin\Release\net10.0-android\net.coffeewebjp.coffeeeagle.reader-Signed.apk
+~~~
+
+出力のSHA-1は必ず次と一致すること。
+
+~~~text
+15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
+~~~
+
+INSTALL_FAILED_UPDATE_INCOMPATIBLE の場合は作業を止め、Debug APKを使っていないか、復元した鍵が正本かを確認する。

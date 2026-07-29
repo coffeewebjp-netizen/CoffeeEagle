@@ -94,6 +94,7 @@ public sealed class EagleLibraryStore
             library.IndexMessage ??= string.Empty;
             library.Folders ??= [];
             library.Assets ??= [];
+            library.SourceEntries ??= [];
             foreach (var asset in library.Assets)
             {
                 asset.FolderIds ??= [];
@@ -106,6 +107,22 @@ public sealed class EagleLibraryStore
                 if (string.IsNullOrWhiteSpace(asset.SourceInfoId))
                 {
                     asset.SourceInfoId = asset.Id;
+                }
+            }
+
+            library.SourceEntries = library.SourceEntries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.SourceInfoId))
+                .GroupBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            foreach (var entry in library.SourceEntries)
+            {
+                if (entry.State is not (EagleSourceEntryState.Active
+                    or EagleSourceEntryState.Deleted
+                    or EagleSourceEntryState.MissingMetadata
+                    or EagleSourceEntryState.ReadFailed))
+                {
+                    entry.State = EagleSourceEntryState.ReadFailed;
                 }
             }
         }

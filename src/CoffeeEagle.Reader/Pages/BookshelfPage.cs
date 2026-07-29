@@ -38,6 +38,42 @@ public sealed class BookshelfPage : ContentPage
         FontSize = 12,
         TextColor = Color.FromArgb("#98A4B5")
     };
+    private readonly Label _syncPhaseLabel = new()
+    {
+        FontSize = 13,
+        FontAttributes = FontAttributes.Bold,
+        TextColor = Color.FromArgb("#21C7A8")
+    };
+    private readonly Label _syncTargetLabel = new()
+    {
+        FontSize = 12,
+        TextColor = Colors.White,
+        LineBreakMode = LineBreakMode.TailTruncation,
+        MaxLines = 2
+    };
+    private readonly Label _syncMetaLabel = new()
+    {
+        FontSize = 11,
+        TextColor = Color.FromArgb("#98A4B5"),
+        LineBreakMode = LineBreakMode.WordWrap
+    };
+    private readonly Label _syncPercentLabel = new()
+    {
+        FontSize = 12,
+        FontAttributes = FontAttributes.Bold,
+        TextColor = Color.FromArgb("#21C7A8"),
+        HorizontalTextAlignment = TextAlignment.End,
+        VerticalTextAlignment = TextAlignment.Center,
+        IsVisible = false
+    };
+    private readonly ProgressBar _syncProgressBar = new()
+    {
+        Progress = 0,
+        ProgressColor = Color.FromArgb("#21C7A8"),
+        BackgroundColor = Color.FromArgb("#26343A"),
+        HeightRequest = 6,
+        IsVisible = false
+    };
     private readonly Label _emptyLabel = new()
     {
         TextColor = Color.FromArgb("#98A4B5"),
@@ -58,11 +94,18 @@ public sealed class BookshelfPage : ContentPage
     private readonly VerticalStackLayout _emptyActions;
     private readonly Button _googleDriveSelectButton;
     private readonly Button _deviceFolderSelectButton;
+    private readonly Border _syncStatusPanel;
     private EagleReaderState _state = new();
     private EagleLibrary? _activeLibrary;
     private bool _loaded;
     private bool _isBusy;
     private Action? _activeSheetCancel;
+    private IDispatcherTimer? _syncTimer;
+    private LibrarySyncProgress? _lastSyncProgress;
+    private DateTimeOffset _syncStartedAt;
+    private DateTimeOffset _syncLastUpdatedAt;
+    private bool _acceptSyncProgress;
+    private long _syncGeneration;
 
     public BookshelfPage(
         EagleLibraryStore store,
@@ -86,6 +129,7 @@ public sealed class BookshelfPage : ContentPage
         _refreshButton = CreateHeaderButton("更新");
         _googleDriveSelectButton = CreatePrimaryButton("Google Drive APIで追加");
         _deviceFolderSelectButton = CreateSecondaryButton("端末/同期フォルダを選択");
+        _syncStatusPanel = CreateSyncStatusPanel();
         _emptyActions = CreateEmptyActions();
         _libraryButton.Clicked += async (_, _) => await ShowLibraryMenuAsync();
         _folderButton.Clicked += async (_, _) => await ShowFolderMenuAsync();
@@ -155,6 +199,7 @@ public sealed class BookshelfPage : ContentPage
             {
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto)
             },
             RowSpacing = 8
@@ -179,8 +224,10 @@ public sealed class BookshelfPage : ContentPage
         controls.Children.Add(actionGrid);
         controls.Children.Add(_searchBar);
         controls.Children.Add(_summaryLabel);
+        controls.Children.Add(_syncStatusPanel);
         Grid.SetRow(_searchBar, 1);
         Grid.SetRow(_summaryLabel, 2);
+        Grid.SetRow(_syncStatusPanel, 3);
 
         var listLayer = new Grid
         {
@@ -200,6 +247,183 @@ public sealed class BookshelfPage : ContentPage
         Grid.SetRow(controls, 1);
         Grid.SetRow(listLayer, 2);
         return root;
+    }
+
+    private Border CreateSyncStatusPanel()
+    {
+        var phaseRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            },
+            ColumnSpacing = 8,
+            Children = { _syncPhaseLabel, _syncPercentLabel }
+        };
+        Grid.SetColumn(_syncPercentLabel, 1);
+
+        return new Border
+        {
+            IsVisible = false,
+            Margin = new Thickness(0, 2, 0, 0),
+            Padding = new Thickness(11, 9),
+            Stroke = Color.FromArgb("#246A60"),
+            StrokeThickness = 1,
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            BackgroundColor = Color.FromArgb("#10201F"),
+            Content = new VerticalStackLayout
+            {
+                Spacing = 5,
+                Children = { phaseRow, _syncTargetLabel, _syncProgressBar, _syncMetaLabel }
+            }
+        };
+    }
+
+    private IProgress<LibrarySyncProgress> CreateSyncProgressReporter()
+    {
+        var generation = _syncGeneration;
+        return new UiProgress<LibrarySyncProgress>(progress =>
+        {
+            if (_acceptSyncProgress && generation == _syncGeneration)
+            {
+                UpdateSyncStatus(progress);
+            }
+        });
+    }
+
+    private void BeginSyncStatus(string phase, string? target = null)
+    {
+        _syncGeneration++;
+        _acceptSyncProgress = true;
+        _syncStartedAt = DateTimeOffset.Now;
+        _syncLastUpdatedAt = _syncStartedAt;
+        _syncStatusPanel.Stroke = Color.FromArgb("#246A60");
+        _syncStatusPanel.BackgroundColor = Color.FromArgb("#10201F");
+        _syncPhaseLabel.TextColor = Color.FromArgb("#21C7A8");
+        _syncTargetLabel.TextColor = Colors.White;
+        _syncProgressBar.ProgressColor = Color.FromArgb("#21C7A8");
+        _syncProgressBar.Progress = 0;
+        _syncProgressBar.IsVisible = false;
+        _syncPercentLabel.TextColor = Color.FromArgb("#21C7A8");
+        _syncPercentLabel.IsVisible = false;
+        _syncStatusPanel.IsVisible = true;
+        UpdateSyncStatus(new LibrarySyncProgress(phase, target));
+
+        if (_syncTimer is null)
+        {
+            _syncTimer = Dispatcher.CreateTimer();
+            _syncTimer.Interval = TimeSpan.FromSeconds(1);
+            _syncTimer.Tick += (_, _) => RefreshSyncMeta();
+        }
+
+        if (!_syncTimer.IsRunning)
+        {
+            _syncTimer.Start();
+        }
+    }
+
+    private void UpdateSyncStatus(LibrarySyncProgress progress)
+    {
+        _lastSyncProgress = progress;
+        _syncLastUpdatedAt = DateTimeOffset.Now;
+        _syncPhaseLabel.Text = progress.Phase;
+        _syncTargetLabel.Text = string.IsNullOrWhiteSpace(progress.Target)
+            ? "取得対象: --"
+            : $"取得対象: {progress.Target}";
+        var hasDeterminateProgress = progress.Completed.HasValue && progress.Total is > 0;
+        _syncProgressBar.IsVisible = hasDeterminateProgress;
+        _syncPercentLabel.IsVisible = hasDeterminateProgress;
+        if (hasDeterminateProgress)
+        {
+            var fraction = Math.Clamp(
+                (double)progress.Completed!.Value / progress.Total!.Value,
+                0,
+                1);
+            _syncProgressBar.Progress = fraction;
+            _syncPercentLabel.Text = $"{fraction:P0}";
+        }
+
+        _syncStatusPanel.IsVisible = true;
+        RefreshSyncMeta();
+    }
+
+    private void RefreshSyncMeta()
+    {
+        if (_lastSyncProgress is null || !_syncStatusPanel.IsVisible)
+        {
+            return;
+        }
+
+        var parts = new List<string>();
+        if (_lastSyncProgress.Completed.HasValue)
+        {
+            parts.Add(_lastSyncProgress.Total is > 0
+                ? $"{_lastSyncProgress.Completed.Value:N0} / {_lastSyncProgress.Total.Value:N0} 件"
+                : $"{_lastSyncProgress.Completed.Value:N0} 件");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_lastSyncProgress.Detail))
+        {
+            parts.Add(_lastSyncProgress.Detail);
+        }
+
+        var elapsed = DateTimeOffset.Now - _syncStartedAt;
+        parts.Add($"最終更新 {_syncLastUpdatedAt:HH:mm:ss}");
+        parts.Add($"経過 {(int)elapsed.TotalMinutes:00}:{elapsed.Seconds:00}");
+        _syncMetaLabel.Text = string.Join("  |  ", parts);
+    }
+
+    private void EndSyncStatus(string phase = "同期完了", string? detail = null)
+    {
+        _syncTimer?.Stop();
+        var total = _lastSyncProgress?.Total;
+        var completed = total ?? _lastSyncProgress?.Completed;
+        UpdateSyncStatus(new LibrarySyncProgress(
+            phase,
+            _lastSyncProgress?.Target,
+            completed,
+            total,
+            detail ?? _lastSyncProgress?.Detail));
+        _acceptSyncProgress = false;
+    }
+
+    private void FailSyncStatus(Exception exception)
+    {
+        _acceptSyncProgress = false;
+        _syncTimer?.Stop();
+        _syncStatusPanel.Stroke = Color.FromArgb("#8D3F48");
+        _syncStatusPanel.BackgroundColor = Color.FromArgb("#28171B");
+        _syncPhaseLabel.TextColor = Color.FromArgb("#FF8A96");
+        _syncPercentLabel.TextColor = Color.FromArgb("#FF8A96");
+        _syncProgressBar.ProgressColor = Color.FromArgb("#FF8A96");
+        _syncPhaseLabel.Text = $"同期停止: {_lastSyncProgress?.Phase ?? "不明な処理"}";
+        _syncTargetLabel.TextColor = Color.FromArgb("#FFD5D9");
+        _syncMetaLabel.Text = $"{exception.Message}  |  最終更新 {_syncLastUpdatedAt:HH:mm:ss}";
+        _syncStatusPanel.IsVisible = true;
+    }
+
+    private string CreateSyncFailureMessage(Exception exception)
+    {
+        var phase = _lastSyncProgress?.Phase ?? "不明な処理";
+        var target = _lastSyncProgress?.Target ?? "不明";
+        return $"{exception.Message}\n\n停止位置: {phase}\n取得対象: {target}\n最終更新: {_syncLastUpdatedAt:HH:mm:ss}";
+    }
+
+    private static string GetSyncCompletionDetail(EagleLibrary library)
+    {
+        const string startMarker = "追加 ";
+        const string endMarker = " / dirs ";
+        var start = library.IndexMessage.IndexOf(startMarker, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return library.IndexMessage;
+        }
+
+        var end = library.IndexMessage.IndexOf(endMarker, start, StringComparison.Ordinal);
+        return end > start
+            ? library.IndexMessage[start..end]
+            : library.IndexMessage[start..];
     }
 
     private async Task LoadStateAsync()
@@ -288,7 +512,6 @@ public sealed class BookshelfPage : ContentPage
         _state.GoogleDriveFolderId = folderId;
         await SaveStateAsync();
 
-        var progress = new Progress<string>(message => _summaryLabel.Text = message);
         if (!await _drive.HasRefreshTokenAsync())
         {
             var connect = await DisplayAlertAsync(
@@ -301,11 +524,20 @@ public sealed class BookshelfPage : ContentPage
                 return;
             }
 
-            SetBusy(true, "Google Drive認証中...");
+            BeginSyncStatus("Google Drive認証中", "Googleアカウント");
+            var progress = CreateSyncProgressReporter();
+            SetBusy(true);
             try
             {
                 await _drive.AuthorizeWithBrowserAsync(_state, progress);
                 await SaveStateAsync();
+                EndSyncStatus();
+            }
+            catch (Exception ex)
+            {
+                FailSyncStatus(ex);
+                await DisplayAlertAsync("Google Driveに接続できません", CreateSyncFailureMessage(ex), "OK");
+                return;
             }
             finally
             {
@@ -339,18 +571,21 @@ public sealed class BookshelfPage : ContentPage
         await IndexLibraryAsync(_activeLibrary.TreeUri, _activeLibrary);
     }
 
-    private async Task IndexGoogleDriveApiLibraryAsync(EagleLibrary? previous)
+    private async Task IndexGoogleDriveApiLibraryAsync(EagleLibrary? previous, bool allowAssetReuse = true)
     {
         if (_isBusy)
         {
             return;
         }
 
-        var progress = new Progress<string>(message => _summaryLabel.Text = message);
-        SetBusy(true, "Drive API索引作成中...");
+        var succeeded = false;
+        string? completionDetail = null;
+        BeginSyncStatus("Google Drive同期を開始中", previous?.Name ?? "EAGLEライブラリ");
+        var progress = CreateSyncProgressReporter();
+        SetBusy(true);
         try
         {
-            var library = await _drive.IndexAsync(_state, previous, progress);
+            var library = await _drive.IndexAsync(_state, previous, progress, allowAssetReuse: allowAssetReuse);
             UpsertLibrary(library);
 
             _activeLibrary = library;
@@ -364,40 +599,65 @@ public sealed class BookshelfPage : ContentPage
             {
                 await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
             }
+
+            completionDetail = GetSyncCompletionDetail(library);
+            succeeded = true;
         }
         catch (GoogleDriveReconnectRequiredException ex)
         {
-            var reconnect = await DisplayAlertAsync("Google Drive再接続", ex.Message, "接続", "キャンセル");
+            FailSyncStatus(ex);
+            var reconnect = await DisplayAlertAsync("Google Drive再接続", CreateSyncFailureMessage(ex), "接続", "キャンセル");
             if (reconnect)
             {
-                await _drive.AuthorizeWithBrowserAsync(_state, progress);
-                await SaveStateAsync();
+                BeginSyncStatus("Google Drive再接続中", "Googleアカウント");
+                var reconnectProgress = CreateSyncProgressReporter();
+                try
+                {
+                    await _drive.AuthorizeWithBrowserAsync(_state, reconnectProgress);
+                    await SaveStateAsync();
+                }
+                catch (Exception authException)
+                {
+                    FailSyncStatus(authException);
+                    await DisplayAlertAsync("Google Driveに再接続できません", CreateSyncFailureMessage(authException), "OK");
+                    return;
+                }
+
                 SetBusy(false);
-                await IndexGoogleDriveApiLibraryAsync(previous);
+                await IndexGoogleDriveApiLibraryAsync(previous, allowAssetReuse);
             }
         }
         catch (Exception ex)
         {
-            await DisplayAlertAsync("Drive APIで索引化できません", ex.Message, "OK");
+            FailSyncStatus(ex);
+            await DisplayAlertAsync("Drive APIで索引化できません", CreateSyncFailureMessage(ex), "OK");
         }
         finally
         {
             SetBusy(false);
+            if (succeeded)
+            {
+                EndSyncStatus(detail: completionDetail);
+            }
         }
     }
 
-    private async Task IndexLibraryAsync(string treeUri, EagleLibrary? previous)
+    private async Task IndexLibraryAsync(string treeUri, EagleLibrary? previous, bool allowAssetReuse = true)
     {
         if (_isBusy)
         {
             return;
         }
 
-        var progress = new Progress<string>(message => _summaryLabel.Text = message);
-        SetBusy(true, "索引作成中...");
+        var succeeded = false;
+        string? completionDetail = null;
+        BeginSyncStatus("フォルダ同期を開始中", previous?.Name ?? "EAGLEライブラリ");
+        var progress = CreateSyncProgressReporter();
+        SetBusy(true);
         try
         {
-            var library = await _indexer.IndexAsync(treeUri, previous, progress);
+            var library = await Task.Run(() =>
+                _indexer.IndexAsync(treeUri, previous, progress, allowAssetReuse: allowAssetReuse));
             UpsertLibrary(library);
 
             _activeLibrary = library;
@@ -411,14 +671,22 @@ public sealed class BookshelfPage : ContentPage
             {
                 await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
             }
+
+            completionDetail = GetSyncCompletionDetail(library);
+            succeeded = true;
         }
         catch (Exception ex)
         {
-            await DisplayAlertAsync("索引化できません", ex.Message, "OK");
+            FailSyncStatus(ex);
+            await DisplayAlertAsync("索引化できません", CreateSyncFailureMessage(ex), "OK");
         }
         finally
         {
             SetBusy(false);
+            if (succeeded)
+            {
+                EndSyncStatus(detail: completionDetail);
+            }
         }
     }
 
@@ -895,6 +1163,25 @@ public sealed class BookshelfPage : ContentPage
         if (asset.MediaKind == EagleAssetMediaKind.Audio)
         {
             await Navigation.PushAsync(new AudioPlayerPage(_visibleAssets.ToList(), index, _imageSources, _store));
+            return;
+        }
+
+        if (asset.MediaKind == EagleAssetMediaKind.Video)
+        {
+            SetBusy(true, "動画を準備中...");
+            try
+            {
+                await _imageSources.OpenVideoAsync(asset);
+            }
+            catch (Exception ex)
+            {
+                await DisplayAlertAsync("再生できません", ex.Message, "OK");
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+
             return;
         }
 
@@ -1585,5 +1872,19 @@ public sealed class BookshelfPage : ContentPage
             HeightRequest = 38,
             MinimumWidthRequest = 54
         };
+    }
+
+    private sealed class UiProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value)
+        {
+            if (MainThread.IsMainThread)
+            {
+                handler(value);
+                return;
+            }
+
+            MainThread.BeginInvokeOnMainThread(() => handler(value));
+        }
     }
 }

@@ -2,6 +2,8 @@
 
 public sealed class EagleLibrary
 {
+    public const int CurrentIndexFormatVersion = 2;
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     public string Name { get; set; } = "EAGLE Library";
@@ -18,9 +20,15 @@ public sealed class EagleLibrary
 
     public DateTimeOffset IndexedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public int IndexFormatVersion { get; set; }
+
+    public long SourceIndexModifiedStamp { get; set; }
+
     public List<EagleFolder> Folders { get; set; } = [];
 
     public List<EagleAsset> Assets { get; set; } = [];
+
+    public List<EagleSourceEntry> SourceEntries { get; set; } = [];
 }
 
 

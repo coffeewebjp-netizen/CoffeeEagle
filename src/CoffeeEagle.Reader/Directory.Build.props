@@ -1,0 +1,37 @@
+<Project>
+  <PropertyGroup>
+    <CoffeeEagleRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..'))</CoffeeEagleRoot>
+    <CoffeeEagleLocalAndroidSdk>$(CoffeeEagleRoot).tools\android-sdk\</CoffeeEagleLocalAndroidSdk>
+    <CoffeeEagleJdkCurrent>$(CoffeeEagleRoot).tools\jdk\current\</CoffeeEagleJdkCurrent>
+    <CoffeeEagleJdk17Current>$(CoffeeEagleRoot).tools\jdk-17\current\</CoffeeEagleJdk17Current>
+    <CoffeeEagleJdk21Current>$(CoffeeEagleRoot).tools\jdk-21\current\</CoffeeEagleJdk21Current>
+    <CoffeeEagleJdk17Local>$(CoffeeEagleRoot).tools\jdk-17\jdk-17.0.19+10\</CoffeeEagleJdk17Local>
+
+    <CoffeeBookRoot>$([MSBuild]::NormalizeDirectory('$(CoffeeEagleRoot)', '..', 'CoffeeBook', 'COFFEEBOOK'))</CoffeeBookRoot>
+    <CoffeeBookLocalAndroidSdk>$(CoffeeBookRoot).tools\android-sdk\</CoffeeBookLocalAndroidSdk>
+    <CoffeeBookJdkCurrent>$(CoffeeBookRoot).tools\jdk\current\</CoffeeBookJdkCurrent>
+    <CoffeeBookJdk17Current>$(CoffeeBookRoot).tools\jdk-17\current\</CoffeeBookJdk17Current>
+    <CoffeeBookJdk21Current>$(CoffeeBookRoot).tools\jdk-21\current\</CoffeeBookJdk21Current>
+    <CoffeeBookJdk17Local>$(CoffeeBookRoot).tools\jdk-17\jdk-17.0.19+10\</CoffeeBookJdk17Local>
+
+    <EnvironmentJavaSdk>$([System.Environment]::GetEnvironmentVariable('JAVA_HOME'))</EnvironmentJavaSdk>
+    <EnvironmentAndroidSdk>$([System.Environment]::GetEnvironmentVariable('ANDROID_SDK_ROOT'))</EnvironmentAndroidSdk>
+    <EnvironmentAndroidHome>$([System.Environment]::GetEnvironmentVariable('ANDROID_HOME'))</EnvironmentAndroidHome>
+
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeEagleJdkCurrent)bin\java.exe')">$(CoffeeEagleJdkCurrent)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeEagleJdk17Current)bin\java.exe')">$(CoffeeEagleJdk17Current)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeEagleJdk21Current)bin\java.exe')">$(CoffeeEagleJdk21Current)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeEagleJdk17Local)bin\java.exe')">$(CoffeeEagleJdk17Local)</JavaSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(CoffeeEagleLocalAndroidSdk)platforms')">$(CoffeeEagleLocalAndroidSdk)</AndroidSdkDirectory>
+
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeBookJdkCurrent)bin\java.exe')">$(CoffeeBookJdkCurrent)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeBookJdk17Current)bin\java.exe')">$(CoffeeBookJdk17Current)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeBookJdk21Current)bin\java.exe')">$(CoffeeBookJdk21Current)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(CoffeeBookJdk17Local)bin\java.exe')">$(CoffeeBookJdk17Local)</JavaSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(CoffeeBookLocalAndroidSdk)platforms')">$(CoffeeBookLocalAndroidSdk)</AndroidSdkDirectory>
+
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(EnvironmentJavaSdk)' != '' and Exists('$(EnvironmentJavaSdk)\bin\java.exe')">$(EnvironmentJavaSdk)</JavaSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(EnvironmentAndroidSdk)' != '' and Exists('$(EnvironmentAndroidSdk)\platforms')">$(EnvironmentAndroidSdk)</AndroidSdkDirectory>
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(EnvironmentAndroidHome)' != '' and Exists('$(EnvironmentAndroidHome)\platforms')">$(EnvironmentAndroidHome)</AndroidSdkDirectory>
+  </PropertyGroup>
+</Project>

@@ -12,8 +12,8 @@ AndroidのアプリIDはpackage nameと署名証明書の組み合わせで決�
 
 - Package name: net.coffeewebjp.coffeeeagle.reader
 - Release署名 SHA-1: 15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
-- ApplicationDisplayVersion: 0.1.2
-- ApplicationVersion / Android versionCode: 3
+- ApplicationDisplayVersion: 0.1.4
+- ApplicationVersion / Android versionCode: 5
 
 このpackage nameとSHA-1は既存の端末インストールおよびGoogle Cloud Android OAuth clientと一致する。変更しないこと。
 

@@ -11,8 +11,8 @@
     <MauiXamlInflator>SourceGen</MauiXamlInflator>
     <ApplicationTitle>CoffeeEagle</ApplicationTitle>
     <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
-    <ApplicationDisplayVersion>0.1.2</ApplicationDisplayVersion>
-    <ApplicationVersion>3</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.4</ApplicationDisplayVersion>
+    <ApplicationVersion>5</ApplicationVersion>
     <SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>
@@ -26,8 +26,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#0B0E12" />
-    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0B0E12" BaseSize="128,128" />
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\icon.png" ForegroundScale="0.65" Color="#0B0E12" />
+    <MauiSplashScreen Include="Resources\AppIcon\icon.png" Color="#0B0E12" BaseSize="256,256" ForegroundScale="0.65" />
+    <MauiImage Include="Resources\AppIcon\icon.png" BaseSize="256,256" />
     <MauiImage Include="Resources\Images\*" />
     <MauiFont Include="Resources\Fonts\*" />
     <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />

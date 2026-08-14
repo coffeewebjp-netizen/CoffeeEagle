@@ -86,6 +86,23 @@ public sealed class BookshelfPage : ContentPage
         WidthRequest = 22,
         HeightRequest = 22
     };
+    private readonly Grid _startupLayer = new()
+    {
+        BackgroundColor = Color.FromArgb("#0B0E12"),
+        InputTransparent = false,
+        Opacity = 1
+    };
+    private readonly Image _startupIcon = new()
+    {
+        Source = ImageSource.FromFile("icon.png"),
+        Aspect = Aspect.AspectFit,
+        WidthRequest = 300,
+        HeightRequest = 300,
+        HorizontalOptions = LayoutOptions.Center,
+        VerticalOptions = LayoutOptions.Center,
+        Scale = 0.9,
+        Opacity = 0
+    };
     private readonly Button _libraryButton;
     private readonly Button _folderButton;
     private readonly Button _tagButton;
@@ -99,6 +116,7 @@ public sealed class BookshelfPage : ContentPage
     private EagleLibrary? _activeLibrary;
     private bool _loaded;
     private bool _isBusy;
+    private bool _playedStartupAnimation;
     private Action? _activeSheetCancel;
     private IDispatcherTimer? _syncTimer;
     private LibrarySyncProgress? _lastSyncProgress;
@@ -154,6 +172,7 @@ public sealed class BookshelfPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        _ = PlayStartupAnimationAsync();
         if (_loaded)
         {
             RefreshVisibleAssets();
@@ -234,6 +253,8 @@ public sealed class BookshelfPage : ContentPage
             Children = { _assetsView, _emptyActions }
         };
 
+        _startupLayer.Children.Add(_startupIcon);
+
         var root = new Grid
         {
             RowDefinitions =
@@ -242,11 +263,62 @@ public sealed class BookshelfPage : ContentPage
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Star)
             },
-            Children = { topBar, controls, listLayer }
+            Children = { topBar, controls, listLayer, _startupLayer }
         };
         Grid.SetRow(controls, 1);
         Grid.SetRow(listLayer, 2);
+        Grid.SetRowSpan(_startupLayer, 3);
         return root;
+    }
+
+    private async Task PlayStartupAnimationAsync()
+    {
+        if (_playedStartupAnimation)
+        {
+            return;
+        }
+
+        _playedStartupAnimation = true;
+        _startupLayer.IsVisible = true;
+        _startupLayer.InputTransparent = false;
+        _startupLayer.Opacity = 1;
+        _startupIcon.Opacity = 0;
+        _startupIcon.Scale = 0.9;
+
+        await Task.Delay(220);
+        await _startupIcon.FadeToAsync(1, 520, Easing.CubicOut);
+        await Task.Delay(120);
+        await RunStartupExitAnimationAsync();
+        _startupLayer.IsVisible = false;
+        _startupLayer.InputTransparent = true;
+    }
+
+    private Task RunStartupExitAnimationAsync()
+    {
+        var completed = new TaskCompletionSource();
+        var animation = new Animation();
+        animation.Add(0, 1, new Animation(
+            value => _startupIcon.Scale = value,
+            0.9,
+            5.6,
+            Easing.CubicIn));
+        animation.Add(0, 1, new Animation(
+            value => _startupIcon.Opacity = value,
+            1,
+            0,
+            Easing.CubicIn));
+        animation.Add(0, 1, new Animation(
+            value => _startupLayer.Opacity = value,
+            1,
+            0,
+            Easing.CubicIn));
+        animation.Commit(
+            this,
+            "StartupExit",
+            rate: 16,
+            length: 1280,
+            finished: (_, _) => completed.TrySetResult());
+        return completed.Task;
     }
 
     private Border CreateSyncStatusPanel()

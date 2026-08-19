@@ -19,7 +19,7 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 | 起動と機能一覧 | `README.md` | `MauiProgram.cs`, `Pages/BookshelfPage.cs` |
 | `.library` 索引 | `DESIGN.md` 対象データ | `Services/EagleLibraryIndexer.cs` |
 | Google Drive 同期 | `docs/GOOGLE_DRIVE_CREDENTIALS.md` | `Services/GoogleDriveLibraryService.cs` |
-| 本棚 | `DESIGN.md` | `Pages/BookshelfPage.cs` |
+| 本棚 | `DESIGN.md` | `Pages/BookshelfPage.cs` と `BookshelfPage.{Layout,Sync,Library,Menus,Types}.cs` |
 | 画像ビューア | `DESIGN.md` | `Pages/ViewerPage.cs` |
 | 動画 / 音声 | `DESIGN.md` | `Platforms/Android/VideoPlayerActivity.cs`, `Pages/AudioPlayerPage.cs` |
 | Android 署名・更新 | `docs/ANDROID_RELEASE.md` | `.tools/`（Git 外）。鍵は再生成しない |

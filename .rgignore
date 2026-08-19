@@ -1,0 +1,7 @@
+.tools/
+.nuget/
+bin/
+obj/
+dist/
+*.apk
+*.aab

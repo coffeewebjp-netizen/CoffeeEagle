@@ -1,5 +1,7 @@
 ﻿# CoffeeEagle Design
 
+Start at [docs/DESIGN_INDEX.md](docs/DESIGN_INDEX.md). This file is the Android-only product shape. Do not search `bin/` or `obj/`.
+
 ## 基本判断
 
 CoffeeEagle は Android版だけを作る。

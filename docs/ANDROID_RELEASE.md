@@ -1,5 +1,7 @@
 # Android Signing and Cross-PC Update
 
+Start at [DESIGN_INDEX.md](DESIGN_INDEX.md). This file is the Android signing and cross-PC update source of truth.
+
 この文書を CoffeeEagle Reader のAndroid署名・更新手順の正本とする。
 
 ## 目的

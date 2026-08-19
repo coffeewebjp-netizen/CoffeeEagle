@@ -6,7 +6,7 @@ CoffeeEagle は、PC版 EAGLE のライブラリを Android から軽く閲覧�
 
 PC版は作りません。正本管理、編集、タグ付け、サムネイル生成は既存の EAGLE PC版に任せ、Android版は Google Drive などで同期済みの .library フォルダを読み取る専用ビューアとして作ります。
 
-詳しい設計は [DESIGN.md](DESIGN.md) に整理しています。
+設計の入口は [docs/DESIGN_INDEX.md](docs/DESIGN_INDEX.md) です。詳しい方針は [DESIGN.md](DESIGN.md) に整理しています。
 
 運用メモ:
 

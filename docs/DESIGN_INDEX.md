@@ -17,8 +17,8 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 | --- | --- | --- |
 | いまの方針 | `DESIGN.md` | `src/CoffeeEagle.Reader/` |
 | 起動と機能一覧 | `README.md` | `MauiProgram.cs`, `Pages/BookshelfPage.cs` |
-| `.library` 索引 | `DESIGN.md` 対象データ | `Services/EagleLibraryIndexer.cs` |
-| Google Drive 同期 | `docs/GOOGLE_DRIVE_CREDENTIALS.md` | `Services/GoogleDriveLibraryService.cs` |
+| `.library` 索引 | `DESIGN.md` 対象データ | `Services/EagleLibraryIndexer.cs` と `EagleLibraryIndexer.{Scan,Read,Metadata,Types}.cs` |
+| Google Drive 同期 | `docs/GOOGLE_DRIVE_CREDENTIALS.md` | `Services/GoogleDriveLibraryService.cs` と `GoogleDriveLibraryService.{Auth,Scan,Http,Metadata,Types}.cs` |
 | 本棚 | `DESIGN.md` | `Pages/BookshelfPage.cs` と `BookshelfPage.{Layout,Sync,Library,Menus,Types}.cs` |
 | 画像ビューア | `DESIGN.md` | `Pages/ViewerPage.cs` |
 | 動画 / 音声 | `DESIGN.md` | `Platforms/Android/VideoPlayerActivity.cs`, `Pages/AudioPlayerPage.cs` |
@@ -29,4 +29,4 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 - `README.md` は起動・ビルド案内。
 - `DESIGN.md` は Android-only 方針とデータ所有。
 - `docs/ANDROID_RELEASE.md` は署名と cross-PC 更新の正本。
-- `BookshelfPage.cs` / Drive / indexer の分割は、機能改修が必要になるまでしない。
+- `BookshelfPage` / Drive / indexer は partial 分割済み。公開型は変えず、これ以上の表面分割は機能改修が必要になるまでしない。

@@ -20,6 +20,7 @@ public sealed class OfflineAudioPage : ContentPage
     private readonly HashSet<string> _selected = [];
     private readonly ProgressBar _progress = new() { ProgressColor = Color.FromArgb("#21C7A8") };
     private readonly List<Button> _actions = [];
+    private Button _cancel = null!;
     private CancellationTokenSource? _operation;
     private bool _savedMode;
     private Task _targetWrite = Task.CompletedTask;
@@ -33,7 +34,7 @@ public sealed class OfflineAudioPage : ContentPage
         BackgroundColor = Color.FromArgb("#0B0E12");
         NavigationPage.SetHasNavigationBar(this, true);
         var source = ActionButton("今の絞り込み", async () => { _savedMode = false; await RefreshAsync(); });
-        var saved = ActionButton("端末に保存済み", async () => { _savedMode = true; await RefreshAsync(); });
+        var saved = ActionButton("スマホに保存済み", async () => { _savedMode = true; await RefreshAsync(); });
         var select = ActionButton("表示分のON / OFF", async () =>
         {
             await _targetWrite;
@@ -43,19 +44,39 @@ public sealed class OfflineAudioPage : ContentPage
             await _offline.Targets.SetAsync(keys, !all);
             await RefreshAsync();
         });
-        var save = ActionButton("同期対象をスマホに保存", () => RunAsync(SaveSelectedAsync, "端末への保存が完了しました。「端末に保存済み」からオフラインで聴けます。"));
-        var send = ActionButton("同期対象をWatchへ送る", () => RunAsync(SendSelectedAsync, "Watchへの保存を確認しました。Watchで「受信を終了」すると音声一覧が表示されます。"));
-        var remove = ActionButton("対象のスマホ内コピーを削除", RemoveSelectedAsync);
-        var limit = ActionButton("端末の容量上限", ChangeLimitAsync);
-        var cancel = new Button { Text = "中止", BackgroundColor = Color.FromArgb("#443039"), TextColor = Colors.White };
-        cancel.Clicked += (_, _) => _operation?.Cancel();
-        _status.Text = "Watchで「音声を受信」を開き、両端末を近くに置いてください。送信前に端末へ保存します。";
+        var save = ActionButton("スマホだけに保存", () => RunAsync(SaveSelectedAsync, "スマホへの保存が完了しました。「スマホに保存済み」からオフラインで聴けます。"));
+        var send = ActionButton("選んだ曲をWatchに保存", () => RunAsync(SendSelectedAsync, "Watchへの保存を確認しました。Watchで「受信を終了」すると音声一覧が表示されます。"));
+        send.BackgroundColor = Color.FromArgb("#21C7A8"); send.TextColor = Color.FromArgb("#0B0E12");
+        var remove = ActionButton("スマホの保存分を削除", RemoveSelectedAsync);
+        remove.BackgroundColor = Color.FromArgb("#443039");
+        var limit = ActionButton("スマホの保存容量を設定", ChangeLimitAsync);
+        var phoneStorage = new VerticalStackLayout { IsVisible = false, Spacing = 8, Children =
+        {
+            new Label { Text = "下の操作も、Watch用にチェックした曲が対象です。", TextColor = Colors.LightGray, FontSize = 13 },
+            save,
+            new Label { Text = "曲のデータをスマホにダウンロードします。スマホだけでオフライン再生したいときに使います。", TextColor = Colors.LightGray, FontSize = 13 },
+            remove,
+            new Label { Text = "曲のデータをスマホから削除し、空き容量を増やします。Watch・Driveの曲とチェックは残ります。", TextColor = Colors.LightGray, FontSize = 13 },
+            limit
+        } };
+        Button? manage = null;
+        manage = ActionButton("スマホの保存を管理 ▾", () =>
+        {
+            phoneStorage.IsVisible = !phoneStorage.IsVisible;
+            manage!.Text = phoneStorage.IsVisible ? "スマホの保存を管理 ▴" : "スマホの保存を管理 ▾";
+            return Task.CompletedTask;
+        });
+        _cancel = new Button { Text = "中止", IsVisible = false, BackgroundColor = Color.FromArgb("#443039"), TextColor = Colors.White };
+        _cancel.Clicked += (_, _) => _operation?.Cancel();
+        _progress.IsVisible = false;
+        _status.Text = "Watchで「音声を受信」を開き、両端末を近くに置いてください。";
         var header = new VerticalStackLayout { Padding = 14, Spacing = 8, Children =
         {
-            new Label { Text = "チェック＝Watch同期対象。ファイルごとにスマホで記憶します。OFFにしても保存済みコピーは残ります。動画は対象外です。", TextColor = Colors.LightGray, FontSize = 13 },
+            new Label { Text = "Watchに入れたい曲にチェックします。選択は記憶され、チェックを外しても保存済みの曲は消えません。動画は対象外です。", TextColor = Colors.LightGray, FontSize = 13 },
             new HorizontalStackLayout { Spacing = 6, Children = { source, saved } }, _usage,
-            new HorizontalStackLayout { Spacing = 6, Children = { select, limit } },
-            _selectionSummary, save, send, remove, _status, _progress, cancel
+            select, _selectionSummary, send,
+            new Label { Text = "スマホにない曲は、自動でダウンロードしてからWatchへ送ります。通常はこのボタンだけで完了します。", TextColor = Colors.LightGray, FontSize = 13 },
+            _status, _progress, _cancel, manage, phoneStorage
         } };
         _list.Padding = new Thickness(14, 0, 14, 24);
         Content = new ScrollView { Content = new VerticalStackLayout { Children = { header, _list } } };
@@ -88,7 +109,7 @@ public sealed class OfflineAudioPage : ContentPage
         var targets = await _offline.Targets.ReadAsync();
         _selected.Clear(); _selected.UnionWith(targets);
         var snapshot = await _offline.Store.SnapshotAsync();
-        _usage.Text = $"端末保存 {Size(snapshot.UsedBytes)} / 上限 {Size(snapshot.LimitBytes)}";
+        _usage.Text = $"スマホの保存容量 {Size(snapshot.UsedBytes)} / 上限 {Size(snapshot.LimitBytes)}";
         _list.Children.Clear();
         _sizes.Clear();
         if (_savedMode)
@@ -168,7 +189,7 @@ public sealed class OfflineAudioPage : ContentPage
     {
         var keys = ScopedTargets();
         var bytes = keys.Sum(key => Math.Max(0, _sizes.GetValueOrDefault(key)));
-        _selectionSummary.Text = (_savedMode ? "保存済み音声の同期対象" : "このライブラリ全体の同期対象") + $" {keys.Count}曲 · {Size(bytes)}" +
+        _selectionSummary.Text = (_savedMode ? "Watchに入れる曲（スマホ保存済み）" : "Watchに入れる曲（ライブラリ全体）") + $" {keys.Count}曲 · {Size(bytes)}" +
             (keys.Any(key => _sizes.GetValueOrDefault(key) <= 0) ? "（サイズ未確定を含む）" : "");
     }
     private HashSet<string> ScopedTargets() => _selected.Where(_sizes.ContainsKey).ToHashSet();
@@ -177,10 +198,11 @@ public sealed class OfflineAudioPage : ContentPage
     {
         if (_operation is not null) return;
         await _targetWrite;
-        if (ScopedTargets().Count == 0) { _status.Text = "Watch同期対象をONにしてください。"; return; }
+        if (ScopedTargets().Count == 0) { _status.Text = "Watchに入れたい曲にチェックしてください。"; return; }
         using var cancel = new CancellationTokenSource();
         cancel.CancelAfter(TimeSpan.FromMinutes(30));
         _operation = cancel;
+        _progress.Progress = 0; _progress.IsVisible = true; _cancel.IsVisible = true;
         foreach (var button in _actions) button.IsEnabled = false;
         _list.IsEnabled = false;
         DeviceDisplay.Current.KeepScreenOn = true;
@@ -191,6 +213,7 @@ public sealed class OfflineAudioPage : ContentPage
         {
             DeviceDisplay.Current.KeepScreenOn = false;
             _operation = null;
+            _progress.IsVisible = false; _cancel.IsVisible = false;
             foreach (var button in _actions) button.IsEnabled = true;
             _list.IsEnabled = true;
             await RefreshAsync();
@@ -238,7 +261,7 @@ public sealed class OfflineAudioPage : ContentPage
     {
         await _targetWrite;
         var targets = ScopedTargets();
-        if (targets.Count == 0 || !await DisplayAlertAsync("端末の音声を削除", $"同期対象 {targets.Count}曲のスマホ内コピーだけを削除します。Watch・Drive・EAGLEの音声と同期対象の設定は残ります。", "端末から削除", "キャンセル")) return;
+        if (targets.Count == 0 || !await DisplayAlertAsync("スマホの保存分を削除", $"チェックした {targets.Count}曲のうち、スマホに保存してあるデータを削除します。Watch・Drive・EAGLEの音声とチェックは残ります。", "スマホから削除", "キャンセル")) return;
         foreach (var key in targets) await _offline.Store.RemoveAsync(key);
         await RefreshAsync();
     }
@@ -246,7 +269,7 @@ public sealed class OfflineAudioPage : ContentPage
     private async Task ChangeLimitAsync()
     {
         var snapshot = await _offline.Store.SnapshotAsync();
-        var value = await DisplayPromptAsync("端末の容量上限", "GB単位で指定してください。保存済み音声は自動削除しません。", "保存", "キャンセル", initialValue: ((double)snapshot.LimitBytes / OfflineAudioStore.GiB).ToString("0.##"), keyboard: Keyboard.Numeric);
+        var value = await DisplayPromptAsync("スマホの保存容量", "上限をGB単位で指定してください。保存済み音声は自動削除しません。", "保存", "キャンセル", initialValue: ((double)snapshot.LimitBytes / OfflineAudioStore.GiB).ToString("0.##"), keyboard: Keyboard.Numeric);
         if (value is null) return;
         if (!double.TryParse(value, out var gb) || !double.IsFinite(gb) || gb < 0.0625 || gb > 1024) throw new InvalidOperationException("0.0625〜1024 GBを指定してください。");
         await _offline.Store.SetLimitAsync((long)(gb * OfflineAudioStore.GiB)); await RefreshAsync();

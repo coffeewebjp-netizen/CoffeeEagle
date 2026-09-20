@@ -9,6 +9,8 @@
     <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
     <ApplicationVersion>7</ApplicationVersion>
     <SupportedOSPlatformVersion>30.0</SupportedOSPlatformVersion>
+    <!-- Pixel Watch can expose only armeabi-v7a even on recent Wear OS builds. -->
+    <RuntimeIdentifiers>android-arm;android-arm64;android-x64</RuntimeIdentifiers>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>
   </PropertyGroup>

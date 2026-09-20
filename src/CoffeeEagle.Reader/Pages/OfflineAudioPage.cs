@@ -70,12 +70,26 @@ public sealed class OfflineAudioPage : ContentPage
         _cancel.Clicked += (_, _) => _operation?.Cancel();
         _progress.IsVisible = false;
         _status.Text = "Watchで「音声を受信」を開き、両端末を近くに置いてください。";
+        var guide = new Border
+        {
+            BackgroundColor = Color.FromArgb("#14251F"), Stroke = Color.FromArgb("#315449"),
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 10 },
+            Padding = 12,
+            Content = new VerticalStackLayout { Spacing = 8, Children =
+            {
+                new Label { Text = "普段は「Watchに保存」だけでOK", TextColor = Color.FromArgb("#21C7A8"), FontSize = 14, FontAttributes = FontAttributes.Bold },
+                new Label { Text = "選んだ曲をWatchに保存\nスマホにない曲をダウンロードしてから、Watchへ送ります。", TextColor = Colors.White, FontSize = 13 },
+                new Label { Text = "スマホだけに保存\nスマホでオフライン再生したいときに使います。", TextColor = Colors.White, FontSize = 13 },
+                new Label { Text = "スマホの保存分を削除\nスマホの空き容量を増やします。Watch・Driveの曲とチェックは残ります。", TextColor = Colors.White, FontSize = 13 },
+                new Label { Text = "スマホだけの操作は、下の「スマホの保存を管理」から行えます。", TextColor = Colors.LightGray, FontSize = 12 }
+            } }
+        };
         var header = new VerticalStackLayout { Padding = 14, Spacing = 8, Children =
         {
             new Label { Text = "Watchに入れたい曲にチェックします。選択は記憶され、チェックを外しても保存済みの曲は消えません。動画は対象外です。", TextColor = Colors.LightGray, FontSize = 13 },
             new HorizontalStackLayout { Spacing = 6, Children = { source, saved } }, _usage,
             select, _selectionSummary, send,
-            new Label { Text = "スマホにない曲は、自動でダウンロードしてからWatchへ送ります。通常はこのボタンだけで完了します。", TextColor = Colors.LightGray, FontSize = 13 },
+            guide,
             _status, _progress, _cancel, manage, phoneStorage
         } };
         _list.Padding = new Thickness(14, 0, 14, 24);

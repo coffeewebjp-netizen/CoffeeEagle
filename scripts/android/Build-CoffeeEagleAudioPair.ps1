@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw "Watch APKの作成に失敗しました。" }
 $destination = Join-Path $repoRoot "dist\watch-audio"
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 $packageId = "net.coffeewebjp.coffeeeagle.reader"
-$phone = Join-Path $destination "CoffeeEagle-0.2.2-phone.apk"
+$phone = Join-Path $destination "CoffeeEagle-0.2.3-phone.apk"
 $watch = Join-Path $destination "CoffeeEagle-0.2.1-watch.apk"
 Copy-Item -LiteralPath (Join-Path $repoRoot "src\CoffeeEagle.Reader\bin\Release\net10.0-android\$packageId-Signed.apk") -Destination $phone -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "src\CoffeeEagle.Wear\bin\Release\net10.0-android\$packageId-Signed.apk") -Destination $watch -Force

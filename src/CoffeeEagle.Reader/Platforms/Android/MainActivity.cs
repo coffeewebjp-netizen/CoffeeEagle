@@ -13,6 +13,13 @@ public class MainActivity : MauiAppCompatActivity
     private static TaskCompletionSource<AndroidUri?>? pendingDocumentTree;
 
     public static MainActivity? Current { get; private set; }
+    public static event Action? ForegroundLost;
+
+    protected override void OnStop()
+    {
+        ForegroundLost?.Invoke();
+        base.OnStop();
+    }
 
     public static Task<AndroidUri?> PickDocumentTreeAsync()
     {

@@ -1,6 +1,8 @@
 ﻿param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
+    [ValidateSet("Reader", "Watch")]
+    [string]$Target = "Reader",
     [string]$AndroidSdkDirectory,
     [string]$JavaSdkDirectory,
     [string]$AdbPath,
@@ -16,8 +18,9 @@ $ErrorActionPreference = "Stop"
 $packageId = "net.coffeewebjp.coffeeeagle.reader"
 $expectedSha1 = "15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$projectPath = Join-Path $repoRoot "src\CoffeeEagle.Reader\CoffeeEagle.Reader.csproj"
-$projectBuildArgument = ".\src\CoffeeEagle.Reader\CoffeeEagle.Reader.csproj"
+$projectName = if ($Target -eq "Watch") { "CoffeeEagle.Wear" } else { "CoffeeEagle.Reader" }
+$projectPath = Join-Path $repoRoot "src\$projectName\$projectName.csproj"
+$projectBuildArgument = ".\src\$projectName\$projectName.csproj"
 $signingProps = Join-Path $repoRoot ".tools\android-signing\CoffeeEagle.Reader.Signing.props"
 
 function Normalize-Sha1([string]$value) {
@@ -94,7 +97,7 @@ function Resolve-Adb([string]$explicitPath, [string]$androidSdk) {
 }
 
 function Reset-ReleaseOutputs {
-    $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "src\CoffeeEagle.Reader"))
+    $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "src\$projectName"))
     $targets = @(
         [System.IO.Path]::GetFullPath((Join-Path $projectRoot "bin\Release\net10.0-android")),
         [System.IO.Path]::GetFullPath((Join-Path $projectRoot "obj\Release\net10.0-android"))
@@ -179,30 +182,37 @@ if (-not $SkipBuild) {
     }
 }
 
-$outputDirectory = Join-Path $repoRoot "src\CoffeeEagle.Reader\bin\$Configuration\net10.0-android"
+$outputDirectory = Join-Path $repoRoot "src\$projectName\bin\$Configuration\net10.0-android"
 $apkPath = Join-Path $outputDirectory "$packageId-Signed.apk"
 if (-not (Test-Path -LiteralPath $apkPath)) {
     throw "署名済みAPKが見つかりません: $apkPath"
 }
 
-$keytool = Join-Path $javaSdk "bin\keytool.exe"
-$certInfo = & $keytool -printcert -jarfile $apkPath 2>&1
+$apksigner = Get-ChildItem -LiteralPath (Join-Path $androidSdk "build-tools") -Directory |
+    Sort-Object Name -Descending |
+    ForEach-Object { Join-Path $_.FullName "lib\apksigner.jar" } |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+if (-not $apksigner) { throw "Android SDKのapksigner.jarが見つかりません。" }
+$java = Join-Path $javaSdk "bin\java.exe"
+# keytool -jarfile sees only JAR/v1 signatures; modern Watch APKs use v2/v3.
+$certInfo = & $java -jar $apksigner verify --print-certs $apkPath 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "APK署名を検証できませんでした。"
 }
 
-$sha1Line = ($certInfo | Select-String -Pattern "SHA1:" | Select-Object -First 1).Line
-if ([string]::IsNullOrWhiteSpace($sha1Line)) {
+$sha1Matches = @($certInfo | Select-String -Pattern 'Signer #\d+ certificate SHA-1 digest:\s*([0-9a-fA-F]+)')
+if ($sha1Matches.Count -ne 1) {
     throw "APK署名のSHA-1を取得できませんでした。"
 }
 
-$actualSha1 = Normalize-Sha1 (($sha1Line -split "SHA1:", 2)[1])
+$actualSha1 = Normalize-Sha1 $sha1Matches[0].Matches[0].Groups[1].Value
 if ($Configuration -eq "Release" -and $actualSha1 -ne (Normalize-Sha1 $expectedSha1)) {
     throw "APKの署名がCoffeeEagle正本と一致しません。期待SHA-1: $expectedSha1"
 }
 
 Write-Host "APK: $apkPath"
-Write-Host "SHA-1: $expectedSha1"
+Write-Host "SHA-1: $actualSha1"
 
 if ($Install -or $Launch) {
     $adb = Resolve-Adb $AdbPath $androidSdk
@@ -228,6 +238,13 @@ if ($Install -or $Launch) {
     }
     elseif ($DeviceSerial -notin $devices) {
         throw "指定端末がadbのdevice状態ではありません: $DeviceSerial"
+    }
+
+    $deviceFeatures = & $adb -s $DeviceSerial shell pm list features
+    if ($LASTEXITCODE -ne 0) { throw "端末種別を確認できませんでした。" }
+    $isWatch = @($deviceFeatures | Where-Object { $_.Trim() -match '^feature:android\.hardware\.type\.watch(?:=\d+)?$' }).Count -gt 0
+    if (($Target -eq "Watch") -ne $isWatch) {
+        throw "APKと端末種別が一致しません。スマホは-Target Reader、Watchは-Target Watchを指定してください。"
     }
 
     if ($Install) {

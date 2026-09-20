@@ -14,8 +14,11 @@ AndroidのアプリIDはpackage nameと署名証明書の組み合わせで決�
 
 - Package name: net.coffeewebjp.coffeeeagle.reader
 - Release署名 SHA-1: 15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
-- ApplicationDisplayVersion: 0.1.4
-- ApplicationVersion / Android versionCode: 5
+- ApplicationDisplayVersion: 0.2.0
+- Reader ApplicationVersion / Android versionCode: 6
+- Wear ApplicationVersion / Android versionCode: 7（同じpackage name・署名を使用）
+
+スマホ/Watchペアのビルドは `scripts/android/Build-CoffeeEagleAudioPair.ps1`。個別ビルド/更新は既存スクリプトの `-Target Reader`（既定）または `-Target Watch` を指定する。端末種別を確認して誤ったAPKの上書きを拒否する。Watchの使い方と実機検証事項は [WATCH_AUDIO.md](WATCH_AUDIO.md) を参照。
 
 このpackage nameとSHA-1は既存の端末インストールおよびGoogle Cloud Android OAuth clientと一致する。変更しないこと。
 
@@ -142,7 +145,9 @@ New-CoffeeEagleReaderKeystore.ps1 は別の新規アプリ署名を意図的に�
 
 ## 手動検証
 
-APKの証明書:
+APKの署名はSDKの `apksigner` で検証する。Watch APKのv2/v3署名は `keytool -jarfile` では読めない場合があるため、上記ビルドスクリプトも `apksigner verify --print-certs` を使用する。
+
+スマホAPKのv1証明書を補助的に表示する場合:
 
 ~~~powershell
 keytool -printcert -jarfile .\src\CoffeeEagle.Reader\bin\Release\net10.0-android\net.coffeewebjp.coffeeeagle.reader-Signed.apk

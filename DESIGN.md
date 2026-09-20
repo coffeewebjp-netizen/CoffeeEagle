@@ -6,6 +6,8 @@ Start at [docs/DESIGN_INDEX.md](docs/DESIGN_INDEX.md). This file is the Android-
 
 CoffeeEagle は Android版だけを作る。
 
+0.2.0ではAndroidスマホに加え、Wear OS向けの音声専用コンパニオンを追加する。明示選択した音声の永続オフライン保存・Watch転送は、下記の通常閲覧キャッシュとは別の所有領域として扱う。元ライブラリは変更しない。仕様・保存方式・検証手順は [docs/WATCH_AUDIO.md](docs/WATCH_AUDIO.md) が正本。
+
 CoffeeBook は PC版で本を作り、Android版で読む構成だったが、CoffeeEagle では PC版 EAGLE がすでに正本管理アプリとして存在する。CoffeeEagle が PC版を持つと、EAGLE と二重管理になり、タグ、フォルダ、サムネイル、画像ファイルの同期責務が増える。したがって CoffeeEagle は EAGLE ライブラリを読む Android ビューアに絞る。
 
 ## CoffeeBook から引き継ぐ原則

@@ -32,6 +32,7 @@ public sealed partial class BookshelfPage
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto)
             },
             RowSpacing = 8
@@ -57,9 +58,11 @@ public sealed partial class BookshelfPage
         controls.Children.Add(_searchBar);
         controls.Children.Add(_summaryLabel);
         controls.Children.Add(_syncStatusPanel);
+        controls.Children.Add(_offlineAudioButton);
         Grid.SetRow(_searchBar, 1);
         Grid.SetRow(_summaryLabel, 2);
         Grid.SetRow(_syncStatusPanel, 3);
+        Grid.SetRow(_offlineAudioButton, 4);
 
         var listLayer = new Grid
         {

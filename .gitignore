@@ -3,6 +3,7 @@ bin/
 obj/
 **/bin/
 **/obj/
+dist/
 
 # Local signing and tool caches
 .tools/

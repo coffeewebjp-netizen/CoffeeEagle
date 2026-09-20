@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
+    <ApplicationTitle>CoffeeEagle Audio</ApplicationTitle>
+    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
+    <ApplicationVersion>7</ApplicationVersion>
+    <SupportedOSPlatformVersion>30.0</SupportedOSPlatformVersion>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <AndroidResource Include="../CoffeeEagle.Reader/Resources/AppIcon/icon.png" Link="Resources/drawable/eagle_icon.png" />
+    <PackageReference Include="Xamarin.GooglePlayServices.Wearable" Version="119.0.0.3" />
+    <ProjectReference Include="../CoffeeEagle.Offline/CoffeeEagle.Offline.csproj" />
+    <Compile Include="../CoffeeEagle.WearTransport/*.cs" Link="Transport/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Import Project="$(CoffeeEagleSigningProps)" Condition="Exists('$(CoffeeEagleSigningProps)')" />
+  <Target Name="RequireCoffeeEagleReleaseSigning" BeforeTargets="PrepareForBuild" Condition="'$(Configuration)' == 'Release' and !Exists('$(CoffeeEagleSigningProps)')">
+    <Error Text="共通Release署名を復元してください。既存CoffeeEagleの鍵を再作成しないでください。" />
+  </Target>
+</Project>

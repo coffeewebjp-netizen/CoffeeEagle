@@ -21,6 +21,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<EagleLibraryIndexer>();
         builder.Services.AddSingleton<EagleLibraryStore>();
         builder.Services.AddSingleton<GoogleDriveLibraryService>();
+        builder.Services.AddSingleton<OfflineAudioService>();
         builder.Services.AddSingleton<EagleImageSourceService>();
         builder.Services.AddTransient<BookshelfPage>();
 

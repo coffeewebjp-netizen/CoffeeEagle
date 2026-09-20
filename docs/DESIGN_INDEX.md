@@ -22,6 +22,7 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 | 本棚 | `DESIGN.md` | `Pages/BookshelfPage.cs` と `BookshelfPage.{Layout,Sync,Library,Menus,Types}.cs` |
 | 画像ビューア | `DESIGN.md` | `Pages/ViewerPage.cs` |
 | 動画 / 音声 | `DESIGN.md` | `Platforms/Android/VideoPlayerActivity.cs`, `Pages/AudioPlayerPage.cs` |
+| 音声の持ち出し / Pixel Watch | `docs/WATCH_AUDIO.md` | `Pages/OfflineAudioPage.cs`, `src/CoffeeEagle.Offline/`, `src/CoffeeEagle.WearTransport/`, `src/CoffeeEagle.Wear/` |
 | Android 署名・更新 | `docs/ANDROID_RELEASE.md` | `.tools/`（Git 外）。鍵は再生成しない |
 
 ## 文書の役割

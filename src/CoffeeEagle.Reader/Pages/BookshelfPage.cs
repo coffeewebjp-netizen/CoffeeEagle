@@ -21,6 +21,8 @@ public sealed partial class BookshelfPage : ContentPage
     private readonly EagleImageSourceService _imageSources;
 
     private readonly GoogleDriveLibraryService _drive;
+    private readonly OfflineAudioService _offlineAudio;
+    private readonly Button _offlineAudioButton;
 
     private readonly List<EagleLibrary> _libraries = [];
 
@@ -173,12 +175,19 @@ public sealed partial class BookshelfPage : ContentPage
         EagleLibraryStore store,
         EagleLibraryIndexer indexer,
         EagleImageSourceService imageSources,
-        GoogleDriveLibraryService drive)
+        GoogleDriveLibraryService drive,
+        OfflineAudioService offlineAudio)
     {
         _store = store;
         _indexer = indexer;
         _imageSources = imageSources;
         _drive = drive;
+        _offlineAudio = offlineAudio;
+        _offlineAudioButton = CreateHeaderButton("音声の持ち出し / Watch");
+        _offlineAudioButton.Clicked += async (_, _) =>
+        {
+            if (!_isBusy) await Navigation.PushAsync(new OfflineAudioPage(_offlineAudio, _activeLibrary, _visibleAssets.ToArray(), _imageSources, _store));
+        };
 
         Title = "CoffeeEagle";
         BackgroundColor = Color.FromArgb("#0B0E12");

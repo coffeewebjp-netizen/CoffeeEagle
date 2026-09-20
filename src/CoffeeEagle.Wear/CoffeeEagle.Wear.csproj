@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
     <ApplicationTitle>CoffeeEagle Audio</ApplicationTitle>
-    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
-    <ApplicationVersion>7</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.1</ApplicationDisplayVersion>
+    <ApplicationVersion>9</ApplicationVersion>
     <SupportedOSPlatformVersion>30.0</SupportedOSPlatformVersion>
     <!-- Pixel Watch can expose only armeabi-v7a even on recent Wear OS builds. -->
     <RuntimeIdentifiers>android-arm;android-arm64;android-x64</RuntimeIdentifiers>

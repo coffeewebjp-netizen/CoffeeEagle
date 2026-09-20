@@ -149,7 +149,55 @@ sealed class Suite
                 var store = Store("unsafe");
                 await Reject<InvalidDataException>(() => store.SaveAsync(Request() with { Extension = "/../escape.mp3" }, Source));
                 await Reject<InvalidDataException>(() => store.SaveAsync(Request() with { Key = "../escape" }, Source));
-                await Reject<InvalidDataException>(() => AudioWire.WriteHeaderAsync(new MemoryStream(), new(2, Guid.NewGuid().ToString("N"), Request(hash: new string('a', 64))), default));
+                await Reject<InvalidDataException>(() => AudioWire.WriteHeaderAsync(new MemoryStream(), new(99, Guid.NewGuid().ToString("N"), Request(hash: new string('a', 64))), default));
+            });
+            await Test("Watch targets persist independently of folders and audio copies", async () =>
+            {
+                var path = Path.Combine(_root, "targets.json"); var targets = new WatchTargetStore(path);
+                var first = AudioRequest.KeyFor("library-a", "same-id"); var second = AudioRequest.KeyFor("library-b", "same-id");
+                await targets.SetAsync([first, second], true);
+                Check((await new WatchTargetStore(path).ReadAsync()).SetEquals([first, second]), "restart and library isolation");
+                var store = Store("target-audio"); var track = await store.SaveAsync(Request(), Source);
+                await targets.SetAsync([first, track.Key], true); await targets.SetAsync([first, track.Key], false);
+                Check((await targets.ReadAsync()).SetEquals([second]) && await store.VerifyAsync(track), "OFF only changes flags");
+                await Task.WhenAll(Enumerable.Range(0, 8).Select(x => targets.SetAsync([AudioRequest.Hash(x.ToString())], true)));
+                Check((await targets.ReadAsync()).Count == 9, "parallel choices retained");
+            });
+            await Test("invalid target state fails closed", async () =>
+            {
+                var path = Path.Combine(_root, "bad-targets.json"); var targets = new WatchTargetStore(path);
+                await Reject<InvalidDataException>(() => targets.SetAsync(["../escape"], true));
+                await File.WriteAllTextAsync(path, "{\"Version\":2,\"Keys\":[]}");
+                await Reject<InvalidDataException>(() => targets.SetAsync([AudioRequest.Hash("test")], true));
+                Check((await File.ReadAllTextAsync(path)).Contains("\"Version\":2"), "future state preserved");
+                await File.WriteAllTextAsync(path, "{broken");
+                await Reject<System.Text.Json.JsonException>(() => targets.ReadAsync());
+            });
+            await Test("v2 artwork roundtrips while v1 rejects artwork", async () =>
+            {
+                var art = new byte[] { 0xff, 0xd8, 0xff, 0xd9 };
+                var envelope = new AudioEnvelope(2, Guid.NewGuid().ToString("N"), Request(hash: new string('a', 64)), art);
+                using var stream = new MemoryStream(); await AudioWire.WriteHeaderAsync(stream, envelope, default);
+                var read = await AudioWire.ReadHeaderAsync(new FragmentedStream(stream.ToArray()), default);
+                Check(read.Version == 2 && read.Audio == envelope.Audio && read.Artwork!.SequenceEqual(art), "v2 fragmented header");
+                await Reject<InvalidDataException>(() => AudioWire.WriteHeaderAsync(new MemoryStream(), envelope with { Version = 1 }, default));
+                await Reject<InvalidDataException>(() => AudioWire.WriteHeaderAsync(new MemoryStream(), envelope with { Artwork = new byte[17000] }, default));
+            });
+            await Test("artwork eviction and revision updates preserve audio and foreign files", async () =>
+            {
+                var store = Store("art-audio"); var track = await store.SaveAsync(Request(), Source);
+                var folder = Path.Combine(_root, "art-audio", "artwork"); var artStore = new OfflineArtworkStore(folder, 16384);
+                var art = new byte[10000]; art[0] = 0xff; art[1] = 0xd8; art[2] = 0xff;
+                var sentinel = Path.Combine(folder, "unowned.jpg"); await File.WriteAllTextAsync(sentinel, "original");
+                await artStore.SaveAsync(track.Key, track.Revision, art);
+                Check((await artStore.ReadAsync(track.Key, track.Revision))!.SequenceEqual(art), "art stored");
+                var next = AudioRequest.Hash("next"); await artStore.SaveAsync(track.Key, next, art);
+                Check(await artStore.ReadAsync(track.Key, track.Revision) is null, "old revision removed");
+                var another = AudioRequest.Hash("another"); await artStore.SaveAsync(another, next, art);
+                Check(await artStore.ReadAsync(track.Key, next) is null && await artStore.ReadAsync(another, next) is not null, "bounded cache");
+                Check(await store.VerifyAsync(track) && File.Exists(sentinel), "audio and foreign data preserved");
+                await Reject<InvalidDataException>(() => artStore.SaveAsync("../escape", next, art));
+                await Reject<InvalidDataException>(() => artStore.SaveAsync(another, next, new byte[4]));
             });
             Console.WriteLine($"{_count}/{_count} checks passed.");
         }

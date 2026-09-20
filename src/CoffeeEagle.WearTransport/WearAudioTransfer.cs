@@ -7,7 +7,7 @@ using System.Threading.Channels;
 
 namespace CoffeeEagle.WearTransport;
 
-public sealed record WatchPeer(string Id, string Name);
+public sealed record WatchPeer(string Id, string Name, bool SupportsArtwork = false);
 
 /// <summary>Foreground, nearby companion transfer. Only a verified receiver acknowledgement means success.</summary>
 public static class WearAudioTransfer
@@ -16,7 +16,15 @@ public static class WearAudioTransfer
     {
         var info = await WearableClass.GetCapabilityClient(context)
             .GetCapabilityAsync(AudioWire.Capability, CapabilityClient.FilterReachable).WaitAsync(TimeSpan.FromSeconds(15), ct);
-        return info.Nodes.Where(x => x.IsNearby).Select(x => new WatchPeer(x.Id, x.DisplayName)).ToArray();
+        var artworkNodes = new HashSet<string>();
+        try
+        {
+            var artwork = await WearableClass.GetCapabilityClient(context)
+                .GetCapabilityAsync(AudioWire.ArtworkCapability, CapabilityClient.FilterReachable).WaitAsync(TimeSpan.FromSeconds(10), ct);
+            artworkNodes.UnionWith(artwork.Nodes.Where(x => x.IsNearby).Select(x => x.Id));
+        }
+        catch (Exception) when (!ct.IsCancellationRequested) { /* Older peers still receive v1 audio. */ }
+        return info.Nodes.Where(x => x.IsNearby).Select(x => new WatchPeer(x.Id, x.DisplayName, artworkNodes.Contains(x.Id))).ToArray();
     }
 
     public static async Task SendAsync(Context context, WatchPeer peer, OfflineAudioStore store, OfflineTrack track,
@@ -36,12 +44,14 @@ public static class WearAudioTransfer
         try
         {
             await RequireNearbyAsync(context, peer.Id, token);
-            channel = await channels.OpenChannelAsync(peer.Id, AudioWire.ChannelPrefix + id).WaitAsync(TimeSpan.FromSeconds(15), token);
+            var artwork = peer.SupportsArtwork ? await store.Artwork.ReadAsync(track.Key, track.Revision, token) : null;
+            var prefix = peer.SupportsArtwork ? AudioWire.ArtworkChannelPrefix : AudioWire.ChannelPrefix;
+            channel = await channels.OpenChannelAsync(peer.Id, prefix + id).WaitAsync(TimeSpan.FromSeconds(15), token);
             using var abort = token.Register(() => _ = QuietCloseAsync(channels, channel));
             proximity = GuardProximityAsync(context, peer.Id, transfer);
             using var javaOutput = await channels.GetOutputStreamAsync(channel).WaitAsync(TimeSpan.FromSeconds(20), token);
             using var output = new OutputStreamInvoker(javaOutput);
-            await AudioWire.WriteHeaderAsync(output, new(1, id, track.Request), token);
+            await AudioWire.WriteHeaderAsync(output, new(peer.SupportsArtwork ? 2 : 1, id, track.Request, artwork), token);
             await output.FlushAsync(token);
             var ready = await replies.NextAsync(token);
             if (ready == "stored") return; // Receiver already verified this revision and content hash.
@@ -136,6 +146,7 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
             await WearableClass.GetChannelClient(_context).RegisterChannelCallbackAsync(this);
             _started = true;
             await WearableClass.GetCapabilityClient(_context).AddLocalCapabilityAsync(AudioWire.Capability);
+            await WearableClass.GetCapabilityClient(_context).AddLocalCapabilityAsync(AudioWire.ArtworkCapability);
             _lifetime.Token.ThrowIfCancellationRequested();
         }
         finally { _lifecycleGate.Release(); }
@@ -143,7 +154,8 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
 
     public override void OnChannelOpened(ChannelClient.IChannel channel)
     {
-        if (!channel.Path.StartsWith(AudioWire.ChannelPrefix, StringComparison.Ordinal)) return;
+        if (!channel.Path.StartsWith(AudioWire.ChannelPrefix, StringComparison.Ordinal) &&
+            !channel.Path.StartsWith(AudioWire.ArtworkChannelPrefix, StringComparison.Ordinal)) return;
         if (_lifetime.IsCancellationRequested)
         {
             _ = WearAudioTransfer.QuietCloseAsync(WearableClass.GetChannelClient(_context), channel);
@@ -158,7 +170,9 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
     private async Task ReceiveAsync(ChannelClient.IChannel channel)
     {
         var client = WearableClass.GetChannelClient(_context);
-        var id = channel.Path[AudioWire.ChannelPrefix.Length..];
+        var version = channel.Path.StartsWith(AudioWire.ArtworkChannelPrefix, StringComparison.Ordinal) ? 2 : 1;
+        var prefix = version == 2 ? AudioWire.ArtworkChannelPrefix : AudioWire.ChannelPrefix;
+        var id = channel.Path[prefix.Length..];
         if (!AudioWire.IsTransferId(id)) { await WearAudioTransfer.QuietCloseAsync(client, channel); return; }
         if (!await _singleTransfer.WaitAsync(0))
         {
@@ -175,11 +189,12 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
             using var javaInput = await client.GetInputStreamAsync(channel).WaitAsync(TimeSpan.FromSeconds(20), cancel.Token);
             using var input = new InputStreamInvoker(javaInput);
             var header = await AudioWire.ReadHeaderAsync(input, cancel.Token).WaitAsync(TimeSpan.FromSeconds(20), cancel.Token);
-            if (header.TransferId != id) throw new InvalidDataException("転送IDが一致しません。");
+            if (header.TransferId != id || header.Version != version) throw new InvalidDataException("転送IDまたはバージョンが一致しません。");
             var snapshot = await _store.SnapshotAsync(cancel.Token);
             var existing = snapshot.Tracks.FirstOrDefault(x => x.Key == header.Audio.Key && x.Revision == header.Audio.Revision && x.Sha256 == header.Audio.Sha256);
             if (existing is not null && await _store.VerifyAsync(existing, cancel.Token))
             {
+                await SaveArtworkAsync(header, cancel.Token);
                 await ReplyAsync(channel.NodeId, id, "stored");
                 _status("保存済みです: " + existing.Title);
                 return;
@@ -196,6 +211,7 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
                 if (percent != lastPercent) { lastPercent = percent; _status($"受信 {percent}%\n{header.Audio.Title}"); }
             });
             await _store.SaveAsync(header.Audio, _ => Task.FromResult<Stream>(content), progress, cancel.Token);
+            await SaveArtworkAsync(header, cancel.Token);
             await ReplyAsync(channel.NodeId, id, "stored");
             _status("保存完了: " + header.Audio.Title);
         }
@@ -217,6 +233,13 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
         catch { /* The sender times out and can safely repeat the same verified transfer. */ }
     }
 
+    private async Task SaveArtworkAsync(AudioEnvelope header, CancellationToken ct)
+    {
+        if (header.Artwork is null) return;
+        try { await _store.Artwork.SaveAsync(header.Audio.Key, header.Audio.Revision, header.Artwork, ct); }
+        catch (IOException) { /* Optional artwork failure must not invalidate verified audio. */ }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _lifetime.Cancel();
@@ -226,6 +249,7 @@ public sealed class WearAudioReceiver : ChannelClient.ChannelCallback, IAsyncDis
             if (_started)
             {
                 try { await WearableClass.GetCapabilityClient(_context).RemoveLocalCapabilityAsync(AudioWire.Capability).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+                try { await WearableClass.GetCapabilityClient(_context).RemoveLocalCapabilityAsync(AudioWire.ArtworkCapability).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
                 try { await WearableClass.GetChannelClient(_context).UnregisterChannelCallbackAsync(this).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
                 _started = false;
             }

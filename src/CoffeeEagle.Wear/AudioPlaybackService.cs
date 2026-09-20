@@ -13,7 +13,7 @@ namespace CoffeeEagle.Wear;
 public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusChangeListener
 {
     public const string Play = "coffeeeagle.play", Toggle = "coffeeeagle.toggle", Stop = "coffeeeagle.stop",
-        Next = "coffeeeagle.next", Previous = "coffeeeagle.previous", Back15 = "coffeeeagle.back15", Forward15 = "coffeeeagle.forward15";
+        Next = "coffeeeagle.next", Previous = "coffeeeagle.previous", Back15 = "coffeeeagle.back15", Forward15 = "coffeeeagle.forward15", SeekTo = "coffeeeagle.seek";
     private const string NotificationChannelId = "offline-audio";
     public static AudioPlaybackService? Current { get; private set; }
     public static event Action? Changed;
@@ -30,6 +30,8 @@ public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusCh
     private bool _destroyed;
     private CancellationTokenSource _lifetime = new();
     public string? Key => _track?.Key;
+    public OfflineTrack? Track => _track;
+    public bool IsPlaying => Playing;
     public string Title => _track?.Title ?? "CoffeeEagle Audio";
     public string Status { get; private set; } = "準備中";
     public int Position { get { try { return _prepared ? _player?.CurrentPosition ?? 0 : 0; } catch { return 0; } } }
@@ -67,6 +69,7 @@ public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusCh
             case Previous: Move(-1); break;
             case Back15: Seek(Position - 15000); break;
             case Forward15: Seek(Position + 15000); break;
+            case SeekTo: Seek(intent.GetIntExtra("position", 0)); break;
         }
         return StartCommandResult.NotSticky;
     }
@@ -105,6 +108,7 @@ public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusCh
                 if (index >= 0 && index + 1 < _queue.Count) _ = LoadAsync(_queue[index + 1].Key);
                 else { Pause(); Seek(0); }
             };
+            player.SeekComplete += (_, _) => { if (_player == player) { SavePosition(); Publish(); } };
             player.Error += (_, e) =>
             {
                 e.Handled = true;
@@ -149,7 +153,7 @@ public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusCh
     private void Seek(int position)
     {
         if (!_prepared) return;
-        _player?.SeekTo(Math.Clamp(position, 0, Math.Max(0, Duration - 1))); SavePosition(); Publish();
+        _player?.SeekTo(Math.Clamp(position, 0, Math.Max(0, Duration - 1)));
     }
     private void Move(int delta)
     {
@@ -177,7 +181,7 @@ public sealed class AudioPlaybackService : Service, AudioManager.IOnAudioFocusCh
     }
     private async Task PersistLoopAsync(CancellationToken ct)
     {
-        try { while (!ct.IsCancellationRequested) { await Task.Delay(15000, ct); SavePosition(); } }
+        try { while (!ct.IsCancellationRequested) { await Task.Delay(15000, ct); if (Playing) SavePosition(); } }
         catch (OperationCanceledException) { }
     }
     private void Publish()

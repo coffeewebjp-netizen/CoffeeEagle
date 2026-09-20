@@ -14,6 +14,7 @@ public sealed class OfflineAudioStore
     private readonly Func<long> _freeBytes;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _recovered;
+    public OfflineArtworkStore Artwork { get; }
     private string CatalogPath => Path.Combine(_root, "catalog.json");
     private sealed class Catalog
     {
@@ -28,6 +29,7 @@ public sealed class OfflineAudioStore
         _defaultLimit = defaultLimit;
         _freeBytes = freeBytes ?? (() => new DriveInfo(Path.GetPathRoot(_root)!).AvailableFreeSpace);
         Directory.CreateDirectory(_root);
+        Artwork = new(Path.Combine(_root, "artwork"));
     }
 
     private Catalog Load()

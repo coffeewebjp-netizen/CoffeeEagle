@@ -83,6 +83,8 @@ Reader0.2.5は、metadataの拡張子（またはファイル名）から動画�
 
 回帰テストでは、動画・音声それぞれについてアップロード途中から同じmtimeでの復旧、旧Active登録の修復、正常な本体の一時保持、復旧後の差分再利用を検証する。ファイル名のみのmetadataも対象。
 
+2026-09-21のReader0.2.5実機確認（ORC-20260921-018）では、更新前にIMAGE/MP4/19.5KBだった動画が通常の更新1回でVIDEO/MP4/30.2MBへ復旧した。31件のうち該当1件を再読込、30件を再利用し、約5秒で完了。表示20件を保持し、内訳は画像19・動画1から画像18・動画2に修正された。次の更新も約5秒で31件を再利用し、読取失敗・再試行0件で正常な状態を保持した。
+
 ## 公式ドキュメント
 
 - Enable Google Drive API: https://developers.google.com/workspace/drive/api/quickstart/java#enable_the_api

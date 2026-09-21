@@ -57,6 +57,18 @@ SAF経路ではGoogle CloudのOAuthクライアントは不要です。Drive API
 2. Drive APIの索引作成は追加/更新時だけに限定し、通常の検索、タグ切り替え、閲覧では保存済み索引を使う。
 3. 2回目以降の更新は保存済み同期状態と`mtime.json`を照合し、追加・変更されたアセットだけを再取得する。
 
+## フォルダ連携で一覧が取得できない場合
+
+AndroidのDrive Providerは、フォルダ選択画面で見えていてもアプリへの子一覧を空で返すことがある。
+`images`が見つからない、または`mtime`には件数があるのに`.info`が0件になる場合は、Drive上の同じ`.library`フォルダのURLを確認し、`Google Drive APIフォルダ追加`から接続する。
+元のDriveファイルを移動・削除したり、アプリをアンインストールする必要はない。
+API側で更新と件数を確認してから、不要な古いProvider登録だけを整理する。
+
+Reader0.2.4では、更新情報が非空なのにProviderの一覧が空の場合は同期を中止して保存済み一覧を保持する。
+複数のAPIライブラリを登録しても、更新時は各ライブラリ自身のフォルダIDを使用する。最後に追加したフォルダの入力値は新規登録時だけ使用する。
+
+同期の回帰検証: `dotnet run --project tests/CoffeeEagle.Sync.Tests/CoffeeEagle.Sync.Tests.csproj -c Release`。
+
 ## 公式ドキュメント
 
 - Enable Google Drive API: https://developers.google.com/workspace/drive/api/quickstart/java#enable_the_api

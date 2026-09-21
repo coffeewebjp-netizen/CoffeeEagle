@@ -102,6 +102,14 @@ public sealed partial class EagleLibraryIndexer
             progress,
             cancellationToken);
 
+        if (infoDirectories.Count == 0
+            && (mtimeIndex.AssetModifiedAt.Count > 0 || mtimeIndex.DeclaredTotal > 0))
+        {
+            throw new InvalidOperationException(
+                "更新情報にはファイルがありますが、フォルダ連携から一覧を取得できませんでした。保存済みの一覧は保持します。" +
+                "Google Driveの場合は、同じ.libraryフォルダを「Google Drive APIフォルダ追加」から接続してください。");
+        }
+
         var missingPreviousSources = previousSources.Values
             .Where(entry => !infoDirectories.ContainsKey(entry.SourceInfoId))
             .OrderBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)

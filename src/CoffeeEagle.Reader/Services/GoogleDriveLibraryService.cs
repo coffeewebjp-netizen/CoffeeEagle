@@ -46,7 +46,7 @@ public sealed partial class GoogleDriveLibraryService
 
     private readonly EagleLibraryStore _store;
 
-    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _httpClient;
 
     private string? _accessToken;
 
@@ -54,8 +54,14 @@ public sealed partial class GoogleDriveLibraryService
 
 
     public GoogleDriveLibraryService(EagleLibraryStore store)
+        : this(store, new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+    {
+    }
+
+    internal GoogleDriveLibraryService(EagleLibraryStore store, HttpClient httpClient)
     {
         _store = store;
+        _httpClient = httpClient;
     }
 
 
@@ -183,7 +189,15 @@ public sealed partial class GoogleDriveLibraryService
         bool allowAssetReuse = true,
         CancellationToken cancellationToken = default)
     {
-        var folderId = ExtractFolderId(state.GoogleDriveFolderId ?? string.Empty);
+        // The global value is only the last add-dialog input. Existing libraries
+        // must keep their own source when another Drive library is added.
+        var folderId = previous is null
+            ? ExtractFolderId(state.GoogleDriveFolderId ?? string.Empty)
+            : IsDriveFolderUri(previous.TreeUri)
+                ? ExtractFolderId(previous.TreeUri)
+                : previous.SourceKind == EagleLibrarySourceKind.GoogleDriveApi
+                    ? ExtractFolderId(previous.RootDocumentId)
+                    : string.Empty;
         if (string.IsNullOrWhiteSpace(folderId))
         {
             throw new InvalidOperationException("Google DriveのEAGLE .libraryフォルダIDが未設定です。");

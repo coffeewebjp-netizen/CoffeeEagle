@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/CoffeeEagle.Reader/Models/*.cs" Link="Models/%(Filename)%(Extension)" />
+    <Compile Include="../../src/CoffeeEagle.Reader/Services/GoogleDriveLibraryService*.cs"
+             Exclude="../../src/CoffeeEagle.Reader/Services/GoogleDriveLibraryService.Auth.cs"
+             Link="Services/%(Filename)%(Extension)" />
+    <Compile Include="../../src/CoffeeEagle.Reader/Services/EagleLibraryIndexer*.cs" Link="Services/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

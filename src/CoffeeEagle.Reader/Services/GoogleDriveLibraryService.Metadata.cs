@@ -27,6 +27,20 @@ public sealed partial class GoogleDriveLibraryService
         DriveEntry? thumbnail,
         JsonElement metadata)
     {
+        var metadataFileName = ReadString(metadata, "fileName", "filename");
+        var metadataExtension = NormalizeExtension(ReadString(metadata, "ext", "extension") ?? Path.GetExtension(metadataFileName ?? string.Empty));
+        var expectedPlaybackKind = GetExpectedPlaybackKind(metadataExtension);
+        if (expectedPlaybackKind is not null)
+        {
+            // Artwork can arrive before the original and must never become a video/audio file.
+            return supportedFiles
+                .Where(file => expectedPlaybackKind == EagleAssetMediaKind.Video ? IsVideoFile(file) : IsAudioFile(file))
+                .OrderByDescending(file => string.Equals(file.Name, metadataFileName, StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(file => string.Equals(Path.GetExtension(file.Name), metadataExtension, StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(file => file.Size)
+                .FirstOrDefault();
+        }
+
         var candidates = supportedFiles
             .Where(file => thumbnail is null || !string.Equals(file.Id, thumbnail.Id, StringComparison.Ordinal))
             .ToList();
@@ -38,8 +52,6 @@ public sealed partial class GoogleDriveLibraryService
                 .First();
         }
 
-        var metadataFileName = ReadString(metadata, "fileName", "filename");
-        var metadataExtension = NormalizeExtension(ReadString(metadata, "ext", "extension") ?? Path.GetExtension(metadataFileName ?? string.Empty));
         var fallback = allFiles
             .Where(file => thumbnail is null || !string.Equals(file.Id, thumbnail.Id, StringComparison.Ordinal))
             .Where(file => !IsLikelyThumbnail(file))
@@ -64,6 +76,27 @@ public sealed partial class GoogleDriveLibraryService
         }
 
         return thumbnail;
+    }
+
+
+    private static string? GetExpectedPlaybackKind(string? extension)
+    {
+        var normalized = NormalizeExtension(extension);
+        if (normalized is null) return null;
+        if (VideoExtensions.Contains(normalized)) return EagleAssetMediaKind.Video;
+        if (AudioExtensions.Contains(normalized)) return EagleAssetMediaKind.Audio;
+        return null;
+    }
+
+
+    private static bool HasUsablePlaybackOriginal(EagleAsset asset)
+    {
+        var expectedKind = GetExpectedPlaybackKind(asset.Extension ?? Path.GetExtension(asset.FileName));
+        // Revisit legacy Active entries even when Eagle's mtime has not changed.
+        return expectedKind is null
+            || (asset.MediaKind == expectedKind
+                && !string.IsNullOrWhiteSpace(asset.FileUri)
+                && !string.Equals(asset.FileUri, asset.ThumbnailUri, StringComparison.Ordinal));
     }
 
 
@@ -102,7 +135,8 @@ public sealed partial class GoogleDriveLibraryService
 
     private static string ResolveMediaKind(DriveEntry? primaryFile, JsonElement metadata)
     {
-        var extension = NormalizeExtension(ReadString(metadata, "ext", "extension") ?? Path.GetExtension(primaryFile?.Name ?? string.Empty));
+        var extension = NormalizeExtension(ReadString(metadata, "ext", "extension")
+            ?? Path.GetExtension(ReadString(metadata, "fileName", "filename") ?? primaryFile?.Name ?? string.Empty));
         if (primaryFile is not null)
         {
             if (IsAudioFile(primaryFile)) return EagleAssetMediaKind.Audio;

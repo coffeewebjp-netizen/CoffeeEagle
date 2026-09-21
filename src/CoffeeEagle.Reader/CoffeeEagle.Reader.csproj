@@ -11,8 +11,8 @@
     <MauiXamlInflator>SourceGen</MauiXamlInflator>
     <ApplicationTitle>CoffeeEagle</ApplicationTitle>
     <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
-    <ApplicationDisplayVersion>0.2.4</ApplicationDisplayVersion>
-    <ApplicationVersion>12</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.5</ApplicationDisplayVersion>
+    <ApplicationVersion>13</ApplicationVersion>
     <SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>

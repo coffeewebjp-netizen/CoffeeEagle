@@ -71,6 +71,59 @@ await Test("genuinely empty library remains supported", async () =>
     var result = await new EagleLibraryIndexer(new("{\"all\":0}")).IndexAsync("fixture");
     Check(result.Assets.Count == 0, "empty library failed");
 });
+foreach (var (extension, kind) in new[] { ("mp4", EagleAssetMediaKind.Video), ("mp3", EagleAssetMediaKind.Audio) })
+{
+    await Test(extension + " upload completes on ordinary refresh without an mtime change", async () =>
+    {
+        var handler = new PendingMediaFixture(extension); using var http = new HttpClient(handler);
+        var service = new GoogleDriveLibraryService(new(), http);
+        var pending = await service.IndexAsync(new(), Existing("folder-media"));
+        Check(pending.Assets.Count == 0, "thumbnail/cover was registered as the original");
+        Check(pending.SourceEntries.Single().State == EagleSourceEntryState.ReadFailed, "incomplete upload cannot retry");
+        handler.IncludeMedia = true;
+        var complete = await service.IndexAsync(new(), pending);
+        var asset = complete.Assets.Single();
+        Check(asset.MediaKind == kind && asset.SizeBytes == 31_644_520 && asset.FileUri!.Contains("/original/"), "original not recovered");
+        Check(asset.ThumbnailUri!.Contains("/thumbnail/"), "thumbnail lost");
+        var reads = handler.InfoReads;
+        var unchanged = await service.IndexAsync(new(), complete);
+        Check(handler.InfoReads == reads && unchanged.Assets.Single().FileUri == asset.FileUri, "complete original was not reused");
+    });
+    await Test(extension + " legacy active thumbnail is repaired despite unchanged mtime", async () =>
+    {
+        var handler = new PendingMediaFixture(extension) { IncludeMedia = true }; using var http = new HttpClient(handler);
+        var service = new GoogleDriveLibraryService(new(), http);
+        var previous = await service.IndexAsync(new(), Existing("folder-media"));
+        var wrong = previous.Assets.Single();
+        wrong.FileUri = wrong.ThumbnailUri; wrong.MediaKind = EagleAssetMediaKind.Image; wrong.SizeBytes = 19_970;
+        var repaired = await service.IndexAsync(new(), previous);
+        Check(repaired.Assets.Single().MediaKind == kind && repaired.Assets.Single().SizeBytes == 31_644_520, "legacy incomplete entry was reused");
+        Check(wrong.SizeBytes == 19_970, "previous snapshot mutated");
+    });
+    await Test(extension + " temporary missing replacement preserves last valid original and retries", async () =>
+    {
+        var handler = new PendingMediaFixture(extension) { IncludeMedia = true }; using var http = new HttpClient(handler);
+        var service = new GoogleDriveLibraryService(new(), http);
+        var previous = await service.IndexAsync(new(), Existing("folder-media"));
+        handler.IncludeMedia = false; handler.SourceStamp++;
+        var pending = await service.IndexAsync(new(), previous);
+        Check(pending.Assets.Single().FileUri == previous.Assets.Single().FileUri && pending.Assets.Single().MediaKind == kind, "valid original lost during upload");
+        Check(pending.SourceEntries.Single().State == EagleSourceEntryState.ReadFailed, "replacement frozen as active");
+        handler.IncludeMedia = true;
+        var completed = await service.IndexAsync(new(), pending);
+        Check(completed.SourceEntries.Single().State == EagleSourceEntryState.Active && completed.Assets.Single().SourceModifiedStamp == handler.SourceStamp, "replacement not retried");
+    });
+}
+await Test("filename-only metadata keeps a missing video retryable", async () =>
+{
+    var handler = new PendingMediaFixture("mp4") { FileNameOnly = true }; using var http = new HttpClient(handler);
+    var service = new GoogleDriveLibraryService(new(), http);
+    var pending = await service.IndexAsync(new(), Existing("folder-media"));
+    Check(pending.Assets.Count == 0 && pending.SourceEntries.Single().State == EagleSourceEntryState.ReadFailed, "filename-only upload frozen");
+    handler.IncludeMedia = true;
+    var complete = await service.IndexAsync(new(), pending);
+    Check(complete.Assets.Single().MediaKind == EagleAssetMediaKind.Video, "filename-only video not recovered");
+});
 Console.WriteLine($"{passed}/{passed} checks passed");
 
 sealed class DriveFixture : HttpMessageHandler

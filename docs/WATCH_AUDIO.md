@@ -1,10 +1,10 @@
 # Pixel Watch オフライン音声
 
-CoffeeEagle（スマホ0.2.4 / Watch0.2.1）は、スマホに保存した音声を Wear OS アプリへ送り、WatchとBluetoothイヤホンだけで再生する。Google Driveへのログインとライブラリ索引はスマホが担当する。WatchへDriveの認証情報やライブラリ全体を送らない。
+CoffeeEagle（スマホ0.2.5 / Watch0.2.1）は、スマホに保存した音声を Wear OS アプリへ送り、WatchとBluetoothイヤホンだけで再生する。Google Driveへのログインとライブラリ索引はスマホが担当する。WatchへDriveの認証情報やライブラリ全体を送らない。
 
 ## 使い方
 
-1. スマホに `CoffeeEagle-0.2.4-phone.apk`、Watchに `CoffeeEagle-0.2.1-watch.apk` を入れる。両方とも既存CoffeeEagleと同じ署名を使用する。既存アプリをアンインストールしない。
+1. スマホに `CoffeeEagle-0.2.5-phone.apk`、Watchに `CoffeeEagle-0.2.1-watch.apk` を入れる。両方とも既存CoffeeEagleと同じ署名を使用する。既存アプリをアンインストールしない。
 2. スマホの本棚でフォルダ・タグ・検索を選び、「音声の持ち出し / Watch」を開く。「今の絞り込み」には対応する音声だけを表示する。
 3. Watchに入れたい曲にチェックする。選択はスマホが記憶し、フォルダ切替・アプリ再起動後も残る。
 4. Watchで「音声を受信」を押す。両端末を近くに置き、両アプリを表示したまま、スマホから主ボタン「選んだ曲をWatchに保存」を押す。スマホにない曲のダウンロードも自動で行うため、通常はこのボタンだけでよい。「今の絞り込み」表示中は現在のライブラリ全体のチェック済み音声、「スマホに保存済み」表示中は保存済み音声のチェック分が対象。画面の対象件数を確認する。「表示分のON / OFF」は表示中のファイルだけを切り替える。
@@ -73,7 +73,7 @@ dotnet run --project .\tests\CoffeeEagle.Offline.Tests\CoffeeEagle.Offline.Tests
 .\scripts\android\Build-Install-CoffeeEagleReader.ps1 -Target Watch -SkipBuild -Install -Launch -DeviceSerial <watch-serial>
 ```
 
-スクリプトは署名SHA-1と端末種別を確認し、Watch用APKをスマホへ、スマホ用APKをWatchへ入れる操作を拒否する。同一package IDと署名がData Layer連携の条件。Reader0.2.4はversionCode 12、Wear0.2.1は9。Google Playへの公開やAPK配布先の変更は行っていない。
+スクリプトは署名SHA-1と端末種別を確認し、Watch用APKをスマホへ、スマホ用APKをWatchへ入れる操作を拒否する。同一package IDと署名がData Layer連携の条件。Reader0.2.5はversionCode 13、Wear0.2.1は9。Google Playへの公開やAPK配布先の変更は行っていない。
 
 Watchプロジェクトは `android-arm;android-arm64;android-x64` を明示する。今回のPixel Watch 5実機はAndroid 17でも `armeabi-v7a` のみ対応していた。64ビットのみの既定ビルドは `INSTALL_FAILED_NO_MATCHING_ABIS` でインストールできないため、32ビットARMを必ず含める。
 

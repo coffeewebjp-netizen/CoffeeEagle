@@ -127,7 +127,8 @@ public sealed partial class GoogleDriveLibraryService
                     || (sourceModifiedStamp == 0 && sourceIndexUnchanged)))
             {
                 if (string.Equals(previousEntry.State, EagleSourceEntryState.Active, StringComparison.Ordinal)
-                    && previousAsset is not null)
+                    && previousAsset is not null
+                    && HasUsablePlaybackOriginal(previousAsset))
                 {
                     var reusedAsset = CloneAsset(previousAsset);
                     reusedAsset.SourceInfoId = infoId;
@@ -163,7 +164,8 @@ public sealed partial class GoogleDriveLibraryService
             {
                 scan.Assets.Add(result.Asset);
             }
-            else if (IsTemporaryReadState(result.State) && previousAsset is not null)
+            else if (IsTemporaryReadState(result.State) && previousAsset is not null
+                && HasUsablePlaybackOriginal(previousAsset))
             {
                 var retainedAsset = CloneAsset(previousAsset);
                 retainedAsset.SourceInfoId = infoId;
@@ -395,6 +397,13 @@ public sealed partial class GoogleDriveLibraryService
             var thumbnail = SelectThumbnail(imageFiles);
             var primaryFile = SelectPrimaryMedia(files, mediaFiles, thumbnail, root);
             var mediaKind = ResolveMediaKind(primaryFile, root);
+            if (primaryFile is null
+                && (mediaKind == EagleAssetMediaKind.Video || mediaKind == EagleAssetMediaKind.Audio))
+            {
+                // Keep this entry retryable: the upload can finish without another mtime change.
+                scan.AssetReadFailures++;
+                return new AssetReadResult(null, EagleSourceEntryState.ReadFailed);
+            }
             var id = ReadString(root, "id", "uuid") ?? TrimInfoSuffix(infoDirectory.Name);
             var fileName = ReadString(root, "fileName", "filename")
                 ?? primaryFile?.Name

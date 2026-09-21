@@ -69,6 +69,10 @@ Reader0.2.4では、更新情報が非空なのにProviderの一覧が空の場�
 
 同期の回帰検証: `dotnet run --project tests/CoffeeEagle.Sync.Tests/CoffeeEagle.Sync.Tests.csproj -c Release`。
 
+2026-09-21の実機確認（ORC-20260921-018）では、Reader0.2.4を既存データを保持して上書きし、Providerで空一覧になったライブラリを同じDriveフォルダのAPI登録で復旧した。
+31個の`.info`・metadataを読み取り失敗0で取得し、表示対象20件を回復。再更新は31件を再利用して約4秒、別ライブラリは68件を保持したまま93件を再利用して約3秒で完了した。
+既存のスマホ保存音声366.47 MBと現在の6曲の選択を確認し、元ファイル・Watch側データには変更を加えていない。検証後に空の旧Provider登録だけを一覧から外した。
+
 ## 公式ドキュメント
 
 - Enable Google Drive API: https://developers.google.com/workspace/drive/api/quickstart/java#enable_the_api

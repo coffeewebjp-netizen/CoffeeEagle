@@ -21,6 +21,8 @@ public sealed partial class MainActivity : Activity
     private TextView _now = null!;
     private TextView _playerStatus = null!;
     private TextView _usage = null!;
+    private TextView _refreshStatus = null!;
+    private Button _refreshButton = null!;
     private Button _receiveButton = null!;
     private LinearLayout _playbackPanel = null!;
     private LinearLayout _galleryPanel = null!;
@@ -36,6 +38,7 @@ public sealed partial class MainActivity : Activity
     private WearAudioReceiver? _receiver;
     private bool _visible;
     private bool _changingReceive;
+    private bool _refreshingList;
     private CancellationTokenSource? _ticker;
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -48,7 +51,16 @@ public sealed partial class MainActivity : Activity
         _heading = Label("CoffeeEagle", 19); root.AddView(_heading);
         _galleryPanel = new LinearLayout(this) { Orientation = Orientation.Vertical };
         root.AddView(_galleryPanel);
-        _usage = Label("保存済み音声", 12); _galleryPanel.AddView(_usage);
+        var listHeader = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        listHeader.SetGravity(GravityFlags.CenterVertical);
+        _usage = Label("保存済み音声", 12);
+        listHeader.AddView(_usage, new LinearLayout.LayoutParams(0, -2, 1));
+        _refreshButton = Button("更新", async () => await RefreshSafeAsync(showResult: true));
+        _refreshButton.ContentDescription = "Watchの保存一覧を更新";
+        listHeader.AddView(_refreshButton, new LinearLayout.LayoutParams(Dp(56), Dp(48)));
+        _galleryPanel.AddView(listHeader);
+        _refreshStatus = Label("", 11); _refreshStatus.Visibility = ViewStates.Gone;
+        _galleryPanel.AddView(_refreshStatus);
         _list = new LinearLayout(this) { Orientation = Orientation.Vertical }; _galleryPanel.AddView(_list);
         _galleryPanel.AddView(Button("再生画面へ", () => ShowPlayer(true)));
         _playbackPanel = new LinearLayout(this) { Orientation = Orientation.Vertical };
@@ -186,9 +198,24 @@ public sealed partial class MainActivity : Activity
         if (_visible) _status.Text = "受信を終了しました。保存一覧を更新して再生できます。";
     }
 
-    private async Task RefreshSafeAsync()
+    private async Task RefreshSafeAsync(bool showResult = false)
     {
-        try { await RefreshAsync(); } catch (Exception ex) { _status.Text = ex.Message; }
+        if (_refreshingList) return;
+        _refreshingList = true;
+        _refreshButton.Enabled = false;
+        _refreshStatus.Visibility = showResult ? ViewStates.Visible : ViewStates.Gone;
+        if (showResult) _refreshStatus.Text = "一覧を更新中…";
+        try
+        {
+            await RefreshAsync();
+            if (showResult) _refreshStatus.Text = "一覧を更新しました";
+        }
+        catch (Exception ex)
+        {
+            _refreshStatus.Text = "一覧を更新できません: " + ex.Message;
+            _refreshStatus.Visibility = ViewStates.Visible;
+        }
+        finally { _refreshingList = false; _refreshButton.Enabled = true; }
     }
 
     private async Task RefreshAsync()
@@ -302,7 +329,7 @@ public sealed partial class MainActivity : Activity
                 switch (e.Which)
                 {
                     case 0: StartActivity(new Intent(Android.Provider.Settings.ActionBluetoothSettings)); break;
-                    case 1: await RefreshSafeAsync(); break;
+                    case 1: await RefreshSafeAsync(showResult: true); _scroll.ScrollTo(0, 0); break;
                     case 2: ChangeLimit(); break;
                     case 3: Command(AudioPlaybackService.Stop); break;
                 }

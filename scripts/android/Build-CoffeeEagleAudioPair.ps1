@@ -21,7 +21,7 @@ $destination = Join-Path $repoRoot "dist\watch-audio"
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 $packageId = "net.coffeewebjp.coffeeeagle.reader"
 $phone = Join-Path $destination "CoffeeEagle-0.2.6-phone.apk"
-$watch = Join-Path $destination "CoffeeEagle-0.2.3-watch.apk"
+$watch = Join-Path $destination "CoffeeEagle-0.2.4-watch.apk"
 Copy-Item -LiteralPath (Join-Path $repoRoot "src\CoffeeEagle.Reader\bin\Release\net10.0-android\$packageId-Signed.apk") -Destination $phone -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "src\CoffeeEagle.Wear\bin\Release\net10.0-android\$packageId-Signed.apk") -Destination $watch -Force
 $hashes = foreach ($path in @($phone, $watch)) {

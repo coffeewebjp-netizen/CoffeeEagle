@@ -16,8 +16,8 @@ AndroidのアプリIDはpackage nameと署名証明書の組み合わせで決�
 - Release署名 SHA-1: 15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
 - Reader ApplicationDisplayVersion: 0.2.6
 - Reader ApplicationVersion / Android versionCode: 14
-- Wear ApplicationDisplayVersion: 0.2.2
-- Wear ApplicationVersion / Android versionCode: 10（同じpackage name・署名を使用）
+- Wear ApplicationDisplayVersion: 0.2.3
+- Wear ApplicationVersion / Android versionCode: 11（同じpackage name・署名を使用）
 
 スマホ/Watchペアのビルドは `scripts/android/Build-CoffeeEagleAudioPair.ps1`。個別ビルド/更新は既存スクリプトの `-Target Reader`（既定）または `-Target Watch` を指定する。端末種別を確認して誤ったAPKの上書きを拒否する。Watchの使い方と実機検証事項は [WATCH_AUDIO.md](WATCH_AUDIO.md) を参照。
 
@@ -161,3 +161,11 @@ keytool -printcert -jarfile .\src\CoffeeEagle.Reader\bin\Release\net10.0-android
 ~~~
 
 INSTALL_FAILED_UPDATE_INCOMPATIBLE の場合は作業を止め、Debug APKを使っていないか、復元した鍵が正本かを確認する。
+
+## Releaseの起動確認
+
+Reader/WearのReleaseでは `AndroidEnableMarshalMethods=false` を明示する。Wear0.2.2はAPKのビルド・署名・インストールに成功しても、ARM32のPixel Watchで `MainActivity.n_onCreate` の `UnsatisfiedLinkError` により起動直後に終了したため、0.2.3でReaderと同じ設定へ揃えた。変更後はRebuildして生成物を更新する。
+
+この設定はJavaのnativeメソッド登録を最適化する仕組みを切り替える（[公式ビルドプロパティ](https://learn.microsoft.com/en-us/dotnet/android/building-apps/build-properties#androidenablemarshalmethods)）。同系統の.NET10登録失敗は [dotnet/maui#35209](https://github.com/dotnet/maui/issues/35209) にも報告があるが、個別の原因が同一とは断定しない。
+
+`monkey` の成功応答だけでは起動成功としない。更新スクリプトは起動2秒後にプロセスが残っていることを確認する。その後も実画面・対象プロセスのlogcatを確認し、ロック/Dozingで画面が見えない場合と実際のクラッシュを区別する。

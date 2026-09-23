@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ApplicationId>net.coffeewebjp.coffeeeagle.reader</ApplicationId>
     <ApplicationTitle>CoffeeEagle Audio</ApplicationTitle>
-    <ApplicationDisplayVersion>0.2.2</ApplicationDisplayVersion>
-    <ApplicationVersion>10</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.3</ApplicationDisplayVersion>
+    <ApplicationVersion>11</ApplicationVersion>
     <SupportedOSPlatformVersion>30.0</SupportedOSPlatformVersion>
     <!-- Pixel Watch can expose only armeabi-v7a even on recent Wear OS builds. -->
     <RuntimeIdentifiers>android-arm;android-arm64;android-x64</RuntimeIdentifiers>
@@ -15,6 +15,8 @@
     <CoffeeEagleSigningProps>$(MSBuildProjectDirectory)\..\..\.tools\android-signing\CoffeeEagle.Reader.Signing.props</CoffeeEagleSigningProps>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Match Reader: avoid native OnCreate registration failures on the ARM32 Watch. -->
+    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
     <RunAOTCompilation>false</RunAOTCompilation>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>

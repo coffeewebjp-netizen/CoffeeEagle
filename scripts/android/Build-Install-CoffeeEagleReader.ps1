@@ -274,6 +274,12 @@ if ($Install -or $Launch) {
         if ($LASTEXITCODE -ne 0) {
             throw "CoffeeEagle Readerを起動できませんでした。"
         }
+        # A successful launcher event does not prove that the Android activity survived OnCreate.
+        Start-Sleep -Seconds 2
+        $appProcess = (& $adb -s $DeviceSerial shell pidof $packageId) -join " "
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appProcess)) {
+            throw "APKの更新は完了しましたが、CoffeeEagleが起動直後に終了しました。保存データは消さず、logcatの起動エラーを確認してください。"
+        }
     }
 
     $updatedPackage = & $adb -s $DeviceSerial shell dumpsys package $packageId

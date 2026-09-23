@@ -190,7 +190,9 @@ public sealed class OfflineAudioPage : ContentPage
             {
                 if (_operation is not null) return;
                 var asset = new EagleAsset { Id = track.Key, Name = track.Title, FileName = track.Title + track.Extension,
-                    FileUri = new Uri(_offline.Store.PathFor(track)).AbsoluteUri, MediaKind = EagleAssetMediaKind.Audio, SizeBytes = track.Length };
+                    FileUri = new Uri(_offline.Store.PathFor(track)).AbsoluteUri,
+                    LyricsUri = new Uri(_offline.Store.Lyrics.PathFor(track.Key, track.Revision)).AbsoluteUri,
+                    MediaKind = EagleAssetMediaKind.Audio, SizeBytes = track.Length };
                 await Navigation.PushAsync(new AudioPlayerPage([asset], 0, _media, _readerStore));
             };
             tile.GestureRecognizers.Add(play);
@@ -269,6 +271,8 @@ public sealed class OfflineAudioPage : ContentPage
             var progress = Progress("Watch転送: " + track.Title);
             await Task.Run(() => WearAudioTransfer.SendAsync(context, peer, _offline.Store, track, progress, ct), ct);
         }
+        if (!peer.SupportsLyrics)
+            await DisplayAlertAsync("音声の転送完了", "このWatchアプリは歌詞表示に未対応です。Watch版も更新してから送り直すと歌詞を転送できます。", "OK");
     }
 
     private async Task RemoveSelectedAsync()

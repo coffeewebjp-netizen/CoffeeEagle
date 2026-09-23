@@ -2,6 +2,7 @@
 using AndroidUri = Android.Net.Uri;
 using CoffeeEagle.Reader.Models;
 using CoffeeEagle.Reader.Services;
+using CoffeeEagle.Offline;
 
 namespace CoffeeEagle.Reader.Pages;
 
@@ -16,6 +17,14 @@ public sealed class AudioPlayerPage : ContentPage
     private bool _isSeeking;
     private bool _disposed;
     private bool _continuousPlayback = true;
+    private LrcLyrics? _lyrics;
+    private CancellationTokenSource? _lyricsLoad;
+    private int _trackGeneration;
+    private readonly Label _lyricPrevious = LyricLabel(14, "#98A4B5");
+    private readonly Label _lyricCurrent = LyricLabel(20, "#21C7A8");
+    private readonly Label _lyricNext = LyricLabel(14, "#98A4B5");
+    private readonly Label _lyricStatus = LyricLabel(12, "#98A4B5");
+    private readonly Button _reloadLyrics = CreateControlButton("歌詞を更新", 120);
 
     private readonly Label _titleLabel = new()
     {
@@ -117,14 +126,14 @@ public sealed class AudioPlayerPage : ContentPage
         var optionControls = new HorizontalStackLayout
         {
             HorizontalOptions = LayoutOptions.Center,
-            Children = { _continuousButton }
+            Spacing = 12,
+            Children = { _continuousButton, _reloadLyrics }
         };
 
         var panel = new VerticalStackLayout
         {
             Padding = new Thickness(22),
-            Spacing = 22,
-            VerticalOptions = LayoutOptions.Center,
+            Spacing = 14,
             Children =
             {
                 new Label
@@ -139,10 +148,16 @@ public sealed class AudioPlayerPage : ContentPage
                 _positionSlider,
                 _timeLabel,
                 transportControls,
-                optionControls
+                optionControls,
+                _lyricStatus,
+                _lyricPrevious,
+                _lyricCurrent,
+                _lyricNext
             }
         };
 
+        var scroll = new ScrollView { Content = panel };
+        Grid.SetRow(scroll, 1);
         return new Grid
         {
             RowDefinitions =
@@ -150,7 +165,7 @@ public sealed class AudioPlayerPage : ContentPage
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Star)
             },
-            Children = { top, panel }
+            Children = { top, scroll }
         };
     }
 
@@ -160,6 +175,10 @@ public sealed class AudioPlayerPage : ContentPage
         _previousButton.Clicked += async (_, _) => await MoveAsync(-1);
         _nextButton.Clicked += async (_, _) => await MoveAsync(1);
         _continuousButton.Clicked += async (_, _) => await ToggleContinuousPlaybackAsync();
+        _reloadLyrics.Clicked += async (_, _) =>
+        {
+            if (_assets.Count > 0 && !_disposed) await LoadLyricsAsync(_assets[_index]);
+        };
         _positionSlider.DragStarted += (_, _) => _isSeeking = true;
         _positionSlider.DragCompleted += (_, _) =>
         {
@@ -191,6 +210,8 @@ public sealed class AudioPlayerPage : ContentPage
         }
 
         var asset = _assets[_index];
+        var generation = _trackGeneration;
+        _ = LoadLyricsAsync(asset);
         _titleLabel.Text = asset.Name;
         _metaLabel.Text = $"{_index + 1:N0} / {_assets.Count:N0}  {asset.Extension?.TrimStart('.').ToUpperInvariant()}  {FormatBytes(asset.SizeBytes)}";
         _timeLabel.Text = "00:00 / 00:00";
@@ -207,6 +228,7 @@ public sealed class AudioPlayerPage : ContentPage
         {
             var activity = MainActivity.Current ?? throw new InvalidOperationException("Android activity is not ready.");
             var playbackPath = await _mediaSources.GetPlaybackPathAsync(asset);
+            if (_disposed || generation != _trackGeneration) return;
             var uri = GoogleDriveLibraryService.IsDriveFileUri(uriString)
                 ? null
                 : AndroidUri.Parse(playbackPath) ?? throw new InvalidOperationException("URIを読み取れませんでした。");
@@ -215,7 +237,7 @@ public sealed class AudioPlayerPage : ContentPage
             {
                 MainThread.BeginInvokeOnMainThread(() =>
                 {
-                    if (_player is null)
+                    if (_player is null || _disposed || generation != _trackGeneration)
                     {
                         return;
                     }
@@ -231,7 +253,10 @@ public sealed class AudioPlayerPage : ContentPage
                     }
                 });
             };
-            _player.Completion += (_, _) => MainThread.BeginInvokeOnMainThread(async () => await HandleCompletionAsync());
+            _player.Completion += (_, _) => MainThread.BeginInvokeOnMainThread(async () =>
+            {
+                if (!_disposed && generation == _trackGeneration) await HandleCompletionAsync();
+            });
             if (uri is null)
             {
                 _player.SetDataSource(playbackPath);
@@ -244,6 +269,7 @@ public sealed class AudioPlayerPage : ContentPage
         }
         catch (Exception ex)
         {
+            if (_disposed || generation != _trackGeneration) return;
             DisposePlayer();
             _playButton.Text = "再生";
             _playButton.IsEnabled = true;
@@ -365,11 +391,53 @@ public sealed class AudioPlayerPage : ContentPage
         }
 
         _timeLabel.Text = $"{FormatTime(_player.CurrentPosition)} / {FormatTime(_player.Duration)}";
+        UpdateLyrics(_player.CurrentPosition);
     }
+
+    private async Task LoadLyricsAsync(EagleAsset asset)
+    {
+        _lyricsLoad?.Cancel(); _lyricsLoad?.Dispose();
+        var request = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        _lyricsLoad = request;
+        _lyrics = null;
+        _lyricPrevious.Text = _lyricCurrent.Text = _lyricNext.Text = "";
+        _lyricStatus.Text = "歌詞を読込中…";
+        try
+        {
+            var bytes = await _mediaSources.ReadLyricsAsync(asset, request.Token);
+            if (_disposed || _lyricsLoad != request) return;
+            _lyrics = bytes is null ? null : LrcLyrics.Parse(bytes);
+            _lyricStatus.Text = _lyrics is null ? (asset.LyricsUri is not null ? "歌詞なし · ライブラリ側から保存し直すと取り込めます" : "同じフォルダに同じ名前の .lrc を置くと歌詞を表示します") :
+                _lyrics.IsTimed ? "歌詞 · 再生位置に同期" : string.IsNullOrEmpty(_lyrics.PlainText) ? "表示できる歌詞がありません" : "歌詞 · 時刻情報なし";
+            UpdateLyrics(_player is not null && _isPrepared ? _player.CurrentPosition : 0);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed || _lyricsLoad != request) return;
+            _lyricStatus.Text = ex is OperationCanceledException ? "歌詞を取得できませんでした。「歌詞を更新」で再試行できます" : "歌詞: " + ex.Message;
+        }
+    }
+
+    private void UpdateLyrics(long position)
+    {
+        if (_lyrics is null) return;
+        var words = _lyrics.WindowAt(position);
+        if (_lyricCurrent.Text != words.Current) _lyricCurrent.Text = words.Current;
+        if (_lyricPrevious.Text != words.Previous) _lyricPrevious.Text = words.Previous;
+        if (_lyricNext.Text != words.Next) _lyricNext.Text = words.Next;
+    }
+
+    private static Label LyricLabel(double size, string color) => new()
+    {
+        FontSize = size, TextColor = Color.FromArgb(color), HorizontalTextAlignment = TextAlignment.Center,
+        LineBreakMode = LineBreakMode.WordWrap
+    };
 
     private void DisposePlayer()
     {
         _disposed = true;
+        _trackGeneration++;
+        _lyricsLoad?.Cancel(); _lyricsLoad?.Dispose(); _lyricsLoad = null;
         _isPrepared = false;
         if (_player is null)
         {

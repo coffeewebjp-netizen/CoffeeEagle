@@ -199,6 +199,7 @@ sealed class Suite
                 await Reject<InvalidDataException>(() => artStore.SaveAsync("../escape", next, art));
                 await Reject<InvalidDataException>(() => artStore.SaveAsync(another, next, new byte[4]));
             });
+            await LyricsTests.RunAsync(Test, _root);
             Console.WriteLine($"{_count}/{_count} checks passed.");
         }
         finally { Directory.Delete(_root, recursive: true); }

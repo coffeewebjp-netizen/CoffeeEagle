@@ -1,10 +1,10 @@
 # Pixel Watch オフライン音声
 
-CoffeeEagle（スマホ0.2.5 / Watch0.2.1）は、スマホに保存した音声を Wear OS アプリへ送り、WatchとBluetoothイヤホンだけで再生する。Google Driveへのログインとライブラリ索引はスマホが担当する。WatchへDriveの認証情報やライブラリ全体を送らない。
+CoffeeEagle（スマホ0.2.6 / Watch0.2.2）は、スマホに保存した音声を Wear OS アプリへ送り、WatchとBluetoothイヤホンだけで再生する。Google Driveへのログインとライブラリ索引はスマホが担当する。WatchへDriveの認証情報やライブラリ全体を送らない。同名のLRC歌詞も保存して表示できる（[配置と使い方](LYRICS.md)）。
 
 ## 使い方
 
-1. スマホに `CoffeeEagle-0.2.5-phone.apk`、Watchに `CoffeeEagle-0.2.1-watch.apk` を入れる。両方とも既存CoffeeEagleと同じ署名を使用する。既存アプリをアンインストールしない。
+1. スマホに `CoffeeEagle-0.2.6-phone.apk`、Watchに `CoffeeEagle-0.2.2-watch.apk` を入れる。両方とも既存CoffeeEagleと同じ署名を使用する。既存アプリをアンインストールしない。
 2. スマホの本棚でフォルダ・タグ・検索を選び、「音声の持ち出し / Watch」を開く。「今の絞り込み」には対応する音声だけを表示する。
 3. Watchに入れたい曲にチェックする。選択はスマホが記憶し、フォルダ切替・アプリ再起動後も残る。
 4. Watchで「音声を受信」を押す。両端末を近くに置き、両アプリを表示したまま、スマホから主ボタン「選んだ曲をWatchに保存」を押す。スマホにない曲のダウンロードも自動で行うため、通常はこのボタンだけでよい。「今の絞り込み」表示中は現在のライブラリ全体のチェック済み音声、「スマホに保存済み」表示中は保存済み音声のチェック分が対象。画面の対象件数を確認する。「表示分のON / OFF」は表示中のファイルだけを切り替える。
@@ -50,6 +50,7 @@ Watchの設定メニューにイヤホン接続、保存一覧更新、容量上
 - `src/CoffeeEagle.WearTransport`: Reader/Wearの両ビルドに含める同じC#実装。Wearable Data LayerのChannelClientでストリームを送り、MessageClientで確認応答する。動的な受信能力 `coffeeeagle_audio_receive_v1` は受信画面中だけ公開する。
 - `/coffeeeagle/audio/v1/<transfer-id>`: 4バイトbig-endianのJSON長、最大4096バイトのJSON、指定長の音声。JSONはバージョン、転送ID、音声ID、表示名、リビジョン、拡張子、長さ、SHA-256。元URIやトークンは含めない。
 - 0.2.1は受信中に `coffeeeagle_audio_receive_v2` も公開し、対応相手には `/coffeeeagle/audio/v2/<transfer-id>` を使う。v2ヘッダーは最大32 KiB、任意のJPEG画像は16 KiBまで。旧相手にはv1を使い、新Watchは両方を受け付ける。応答形式は同じ。同じ音声が保存済みでも画像だけ更新できる。
+- Watch0.2.2は歌詞付きのv3も公開する。v1/v2の互換を維持し、音声が保存済みでも歌詞の追加・変更・削除を反映する。詳細は [LYRICS.md](LYRICS.md)。
 - 画像はスマホで元画像の読み込みを4 MiB・復号寸法を制限し、長辺160px以下のJPEGへ縮小する。各端末の画像キャッシュは音声と分離し16 MiBまで、古い画像だけを整理する。Watchでも復号寸法を制限する。欠落・破損時は音符カードを表示し、音声を削除しない。
 - Watch対象はスマホの `watch-targets-v1.json` にライブラリ/ファイルのハッシュID集合として保存する。初期値はOFF。既存音声カタログは変更しない。未知バージョンや破損した設定を勝手に初期化しない。
 - `/coffeeeagle/audio-ack/v1/<transfer-id>`: `ready` / `stored` またはエラー。送信元nodeと転送IDを照合する。Watch側は近くの相手かも確認し、スマホ側は送信中も近接状態を監視する。
@@ -73,7 +74,7 @@ dotnet run --project .\tests\CoffeeEagle.Offline.Tests\CoffeeEagle.Offline.Tests
 .\scripts\android\Build-Install-CoffeeEagleReader.ps1 -Target Watch -SkipBuild -Install -Launch -DeviceSerial <watch-serial>
 ```
 
-スクリプトは署名SHA-1と端末種別を確認し、Watch用APKをスマホへ、スマホ用APKをWatchへ入れる操作を拒否する。同一package IDと署名がData Layer連携の条件。Reader0.2.5はversionCode 13、Wear0.2.1は9。Google Playへの公開やAPK配布先の変更は行っていない。
+スクリプトは署名SHA-1と端末種別を確認し、Watch用APKをスマホへ、スマホ用APKをWatchへ入れる操作を拒否する。同一package IDと署名がData Layer連携の条件。Reader0.2.6はversionCode 14、Wear0.2.2は10。Google Playへの公開やAPK配布先の変更は行っていない。
 
 Watchプロジェクトは `android-arm;android-arm64;android-x64` を明示する。今回のPixel Watch 5実機はAndroid 17でも `armeabi-v7a` のみ対応していた。64ビットのみの既定ビルドは `INSTALL_FAILED_NO_MATCHING_ABIS` でインストールできないため、32ビットARMを必ず含める。
 

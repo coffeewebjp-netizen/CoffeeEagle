@@ -88,6 +88,9 @@ foreach (var (extension, kind) in new[] { ("mp4", EagleAssetMediaKind.Video), ("
         var reads = handler.InfoReads;
         var unchanged = await service.IndexAsync(new(), complete);
         Check(handler.InfoReads == reads && unchanged.Assets.Single().FileUri == asset.FileUri, "complete original was not reused");
+        asset.SourceDirectoryUri = null; // Upgrade an old persisted catalog without rereading every metadata file.
+        var upgraded = await service.IndexAsync(new(), complete);
+        Check(!string.IsNullOrWhiteSpace(upgraded.Assets.Single().SourceDirectoryUri), "missing sibling locator after reuse");
     });
     await Test(extension + " legacy active thumbnail is repaired despite unchanged mtime", async () =>
     {
@@ -124,6 +127,7 @@ await Test("filename-only metadata keeps a missing video retryable", async () =>
     var complete = await service.IndexAsync(new(), pending);
     Check(complete.Assets.Single().MediaKind == EagleAssetMediaKind.Video, "filename-only video not recovered");
 });
+await LyricsSyncTests.RunAsync(Test);
 Console.WriteLine($"{passed}/{passed} checks passed");
 
 sealed class DriveFixture : HttpMessageHandler

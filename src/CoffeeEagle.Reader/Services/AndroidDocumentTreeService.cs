@@ -44,7 +44,7 @@ public sealed class AndroidDocumentTreeService
         return QuerySingle(treeUri, documentUri, fallbackDocumentId: documentId, fallbackName: "EAGLE Library");
     }
 
-    public IReadOnlyList<DocumentEntry> ListChildren(string treeUriString, string documentId)
+    public IReadOnlyList<DocumentEntry> ListChildren(string treeUriString, string documentId, bool requireListing = false)
     {
         var treeUri = ParseUri(treeUriString);
         var childrenUri = DocumentsContract.BuildChildDocumentsUriUsingTree(treeUri, documentId)
@@ -52,6 +52,7 @@ public sealed class AndroidDocumentTreeService
         using var cursor = Resolver.Query(childrenUri, DocumentProjection, null, null, null);
         if (cursor is null)
         {
+            if (requireListing) throw new IOException("歌詞の一覧を取得できませんでした。接続を確認して再試行してください。");
             return [];
         }
 

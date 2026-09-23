@@ -7,6 +7,9 @@ public sealed class EagleImageSourceService
     private readonly AndroidDocumentTreeService _documents;
     private readonly GoogleDriveLibraryService _drive;
 
+    public Task<byte[]?> ReadLyricsAsync(EagleAsset asset, CancellationToken ct) =>
+        new AudioLyricsService(_documents, _drive).ReadAsync(asset, ct);
+
     public EagleImageSourceService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive)
     {
         _documents = documents;

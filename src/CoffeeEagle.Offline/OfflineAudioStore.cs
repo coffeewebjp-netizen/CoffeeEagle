@@ -15,6 +15,7 @@ public sealed class OfflineAudioStore
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _recovered;
     public OfflineArtworkStore Artwork { get; }
+    public OfflineLyricsStore Lyrics { get; }
     private string CatalogPath => Path.Combine(_root, "catalog.json");
     private sealed class Catalog
     {
@@ -30,6 +31,7 @@ public sealed class OfflineAudioStore
         _freeBytes = freeBytes ?? (() => new DriveInfo(Path.GetPathRoot(_root)!).AvailableFreeSpace);
         Directory.CreateDirectory(_root);
         Artwork = new(Path.Combine(_root, "artwork"));
+        Lyrics = new(Path.Combine(_root, "lyrics"));
     }
 
     private Catalog Load()
@@ -182,6 +184,7 @@ public sealed class OfflineAudioStore
             state.Tracks.Remove(track);
             Commit(state);
             TryDelete(PathFor(track));
+            await Lyrics.RemoveAsync(key, ct);
         }
         finally { _gate.Release(); }
     }

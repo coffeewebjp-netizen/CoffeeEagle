@@ -132,6 +132,7 @@ public sealed partial class GoogleDriveLibraryService
                 {
                     var reusedAsset = CloneAsset(previousAsset);
                     reusedAsset.SourceInfoId = infoId;
+                    reusedAsset.SourceDirectoryUri = BuildFolderUri(pair.Value.Id);
                     reusedAsset.SourceModifiedStamp = sourceModifiedStamp;
                     scan.Assets.Add(reusedAsset);
                     scan.SourceEntries.Add(CreateSourceEntry(infoId, sourceModifiedStamp, EagleSourceEntryState.Active));
@@ -302,6 +303,8 @@ public sealed partial class GoogleDriveLibraryService
             FileName = source.FileName,
             Extension = source.Extension,
             FileUri = source.FileUri,
+            SourceDirectoryUri = source.SourceDirectoryUri,
+            LyricsUri = source.LyricsUri,
             ThumbnailUri = source.ThumbnailUri,
             MediaKind = source.MediaKind,
             SourceInfoId = source.SourceInfoId,
@@ -420,6 +423,7 @@ public sealed partial class GoogleDriveLibraryService
                     Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id,
                     Name = string.IsNullOrWhiteSpace(name) ? TrimInfoSuffix(infoDirectory.Name) : name,
                     FileName = fileName,
+                    SourceDirectoryUri = BuildFolderUri(infoDirectory.Id),
                     Extension = extension,
                     FileUri = primaryFile is null ? thumbnail is null ? null : BuildFileUri(thumbnail.Id, thumbnail.Name) : BuildFileUri(primaryFile.Id, primaryFile.Name),
                     ThumbnailUri = thumbnail is null ? mediaKind == EagleAssetMediaKind.Image && primaryFile is not null ? BuildFileUri(primaryFile.Id, primaryFile.Name) : null : BuildFileUri(thumbnail.Id, thumbnail.Name),

@@ -144,6 +144,7 @@ public sealed partial class EagleLibraryIndexer
                 scan.SourceEntries.Add(reusedSource);
                 if (reusedAsset is not null)
                 {
+                    reusedAsset.SourceDirectoryUri = infoDirectory.Uri;
                     scan.Assets.Add(reusedAsset);
                     scan.ReusedAssets++;
                 }
@@ -381,6 +382,8 @@ public sealed partial class EagleLibraryIndexer
             FileName = source.FileName,
             Extension = source.Extension,
             FileUri = source.FileUri,
+            SourceDirectoryUri = source.SourceDirectoryUri,
+            LyricsUri = source.LyricsUri,
             ThumbnailUri = source.ThumbnailUri,
             MediaKind = source.MediaKind,
             SourceInfoId = source.SourceInfoId,

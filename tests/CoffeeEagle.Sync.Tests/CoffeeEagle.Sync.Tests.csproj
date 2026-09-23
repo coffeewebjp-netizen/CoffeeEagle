@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/CoffeeEagle.Offline/CoffeeEagle.Offline.csproj" />
     <Compile Include="../../src/CoffeeEagle.Reader/Models/*.cs" Link="Models/%(Filename)%(Extension)" />
     <Compile Include="../../src/CoffeeEagle.Reader/Services/GoogleDriveLibraryService*.cs"
              Exclude="../../src/CoffeeEagle.Reader/Services/GoogleDriveLibraryService.Auth.cs"

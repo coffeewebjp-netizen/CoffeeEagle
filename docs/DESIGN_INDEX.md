@@ -23,6 +23,7 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 | 画像ビューア | `DESIGN.md` | `Pages/ViewerPage.cs` |
 | 動画 / 音声 | `DESIGN.md` | `Platforms/Android/VideoPlayerActivity.cs`, `Pages/AudioPlayerPage.cs` |
 | 音声の持ち出し / Pixel Watch | `docs/WATCH_AUDIO.md` | `Pages/OfflineAudioPage.cs`, `src/CoffeeEagle.Offline/`, `src/CoffeeEagle.WearTransport/`, `src/CoffeeEagle.Wear/` |
+| LRC歌詞（スマホ・Watch） | `docs/LYRICS.md` | `AudioLyricsService.cs`, `LrcLyrics.cs`, `OfflineLyricsStore.cs`, `MainActivity.Lyrics.cs` |
 | Pixel Watch動画の成立条件（調査・未実装） | `docs/WATCH_VIDEO_FEASIBILITY.md` | 端末デコーダー、既存の音声転送・保存、動画画面の追加条件 |
 | Android 署名・更新 | `docs/ANDROID_RELEASE.md` | `.tools/`（Git 外）。鍵は再生成しない |
 

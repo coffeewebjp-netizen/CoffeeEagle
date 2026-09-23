@@ -12,6 +12,11 @@ public sealed class EagleAsset
 
     public string? FileUri { get; set; }
 
+    public string? SourceDirectoryUri { get; set; }
+
+    // Populated for app-owned offline playback only; live siblings are resolved afresh.
+    public string? LyricsUri { get; set; }
+
     public string? ThumbnailUri { get; set; }
 
     public string MediaKind { get; set; } = EagleAssetMediaKind.Image;

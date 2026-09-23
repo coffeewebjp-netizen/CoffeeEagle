@@ -44,6 +44,15 @@ public sealed class OfflineAudioService
             return await Task.Run(() => _documents.OpenRead(uri), token);
         }, progress, ct);
         await SaveArtworkAsync(asset, track, ct);
+        try
+        {
+            var lyrics = await new AudioLyricsService(_documents, _drive).ReadAsync(asset, ct);
+            await Store.Lyrics.SaveAsync(track.Key, track.Revision, lyrics, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new IOException($"音声は保存済みですが、「{asset.Name}」の歌詞を更新できませんでした。再試行してください。\n{ex.Message}", ex);
+        }
         return track;
     }
 

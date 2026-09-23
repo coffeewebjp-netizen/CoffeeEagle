@@ -14,7 +14,7 @@ using OperationCanceledException = System.OperationCanceledException;
 namespace CoffeeEagle.Wear;
 
 [Activity(Label = "CoffeeEagle Audio", MainLauncher = true, Exported = true)]
-public sealed class MainActivity : Activity
+public sealed partial class MainActivity : Activity
 {
     private LinearLayout _list = null!;
     private TextView _status = null!;
@@ -55,6 +55,7 @@ public sealed class MainActivity : Activity
         var navigation = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         navigation.AddView(Button("一覧", () => ShowPlayer(false)), new LinearLayout.LayoutParams(0, Dp(32), 1));
         navigation.AddView(Button("音量", ShowVolume), new LinearLayout.LayoutParams(0, Dp(32), 1));
+        navigation.AddView(Button("歌詞", ShowLyrics), new LinearLayout.LayoutParams(0, Dp(32), 1));
         _playbackPanel.AddView(navigation);
         _art = new FrameLayout(this);
         _playbackPanel.AddView(_art, new LinearLayout.LayoutParams(Dp(32), Dp(32)) { Gravity = GravityFlags.Center });
@@ -82,6 +83,7 @@ public sealed class MainActivity : Activity
         seek.AddView(Button("−15秒", () => Command(AudioPlaybackService.Back15)), new LinearLayout.LayoutParams(0, Dp(48), 1));
         seek.AddView(Button("＋15秒", () => Command(AudioPlaybackService.Forward15)), new LinearLayout.LayoutParams(0, Dp(48), 1));
         _playbackPanel.AddView(seek); root.AddView(_playbackPanel);
+        CreateLyricsPanel(root);
         var tools = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         _receiveButton = Button("音声を受信", async () => await ToggleReceiveAsync());
         tools.AddView(_receiveButton, new LinearLayout.LayoutParams(0, Dp(48), 2));
@@ -112,7 +114,7 @@ public sealed class MainActivity : Activity
 
     private async Task TickAsync(CancellationToken token)
     {
-        try { while (!token.IsCancellationRequested) { if (_showPlayer) UpdatePlayback(); await Task.Delay(1000, token); } }
+        try { while (!token.IsCancellationRequested) { if (_showPlayer) UpdatePlayback(); await Task.Delay(500, token); } }
         catch (OperationCanceledException) { }
     }
 
@@ -120,14 +122,15 @@ public sealed class MainActivity : Activity
     private void ShowPlayer(bool show)
     {
         if (show && _receiver is not null) _ = StopReceiveAsync();
-        _showPlayer = show; _heading.Visibility = show ? ViewStates.Gone : ViewStates.Visible;
+        _showPlayer = show; _showLyrics = false; _heading.Visibility = show ? ViewStates.Gone : ViewStates.Visible;
         _root.SetPadding(Dp(24), Dp(show ? 18 : 38), Dp(24), Dp(38));
         UpdatePlayback(); _scroll.ScrollTo(0, 0);
     }
     private void UpdatePlayback()
     {
         var player = AudioPlaybackService.Current;
-        _playbackPanel.Visibility = _showPlayer ? ViewStates.Visible : ViewStates.Gone;
+        _playbackPanel.Visibility = _showPlayer && !_showLyrics ? ViewStates.Visible : ViewStates.Gone;
+        _lyricsPanel.Visibility = _showPlayer && _showLyrics ? ViewStates.Visible : ViewStates.Gone;
         _galleryPanel.Visibility = _showPlayer ? ViewStates.Gone : ViewStates.Visible;
         _now.Text = player?.Title ?? "一覧から音声を選んでください";
         _playerStatus.Text = player?.Status == "Bluetoothイヤホンを接続してください" ? "イヤホンを接続してください" : player?.Status ?? "";
@@ -143,6 +146,7 @@ public sealed class MainActivity : Activity
         {
             _artIdentity = identity; _art.RemoveAllViews(); _art.AddView(Artwork(player?.Track), new FrameLayout.LayoutParams(-1, -1));
         }
+        UpdateLyrics(player?.Track, player?.Position ?? 0);
     }
 
     private void Command(string action)
@@ -178,6 +182,7 @@ public sealed class MainActivity : Activity
         Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
         _receiveButton.Text = "音声を受信";
         if (receiver is not null) await receiver.DisposeAsync();
+        _lyricsIdentity = null;
         if (_visible) _status.Text = "受信を終了しました。保存一覧を更新して再生できます。";
     }
 
@@ -224,7 +229,7 @@ public sealed class MainActivity : Activity
             row!.AddView(play, new LinearLayout.LayoutParams(0, -2, 1) { LeftMargin = Dp(3), RightMargin = Dp(3), BottomMargin = Dp(6) });
         }
         if (index % 2 == 1) row!.AddView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        _artIdentity = null; UpdatePlayback();
+        _artIdentity = null; _lyricsIdentity = null; UpdatePlayback();
     }
 
     private GradientDrawable Rounded(string color)

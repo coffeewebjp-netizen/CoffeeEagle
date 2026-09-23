@@ -14,10 +14,10 @@ AndroidのアプリIDはpackage nameと署名証明書の組み合わせで決�
 
 - Package name: net.coffeewebjp.coffeeeagle.reader
 - Release署名 SHA-1: 15:DA:71:1D:E4:FB:EB:B4:B7:38:18:DC:56:C9:21:53:6F:92:B2:C9
-- Reader ApplicationDisplayVersion: 0.2.5
-- Reader ApplicationVersion / Android versionCode: 13
-- Wear ApplicationDisplayVersion: 0.2.1
-- Wear ApplicationVersion / Android versionCode: 9（同じpackage name・署名を使用）
+- Reader ApplicationDisplayVersion: 0.2.6
+- Reader ApplicationVersion / Android versionCode: 14
+- Wear ApplicationDisplayVersion: 0.2.2
+- Wear ApplicationVersion / Android versionCode: 10（同じpackage name・署名を使用）
 
 スマホ/Watchペアのビルドは `scripts/android/Build-CoffeeEagleAudioPair.ps1`。個別ビルド/更新は既存スクリプトの `-Target Reader`（既定）または `-Target Watch` を指定する。端末種別を確認して誤ったAPKの上書きを拒否する。Watchの使い方と実機検証事項は [WATCH_AUDIO.md](WATCH_AUDIO.md) を参照。
 

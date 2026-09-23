@@ -102,6 +102,7 @@ public sealed partial class EagleLibraryIndexer
                 Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id,
                 Name = string.IsNullOrWhiteSpace(name) ? TrimInfoSuffix(infoDirectory.Name) : name,
                 FileName = fileName,
+                SourceDirectoryUri = infoDirectory.Uri,
                 Extension = extension,
                 FileUri = primaryFile?.Uri ?? thumbnail?.Uri,
                 ThumbnailUri = thumbnail?.Uri ?? (mediaKind == EagleAssetMediaKind.Image ? primaryFile?.Uri : null),

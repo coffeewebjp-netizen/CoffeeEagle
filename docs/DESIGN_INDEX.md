@@ -21,6 +21,7 @@ CoffeeEagle is Android-only. Do not look for a Studio/PC app.
 | Google Drive 同期 | `docs/GOOGLE_DRIVE_CREDENTIALS.md` | `Services/GoogleDriveLibraryService.cs` と `GoogleDriveLibraryService.{Auth,Scan,Http,Metadata,Types}.cs` |
 | 本棚 | `DESIGN.md` | `Pages/BookshelfPage.cs` と `BookshelfPage.{Layout,Sync,Library,Menus,Types}.cs` |
 | 画像ビューア | `DESIGN.md` | `Pages/ViewerPage.cs` |
+| 通常ファイルの端末キャッシュ | docs/PHONE_FILE_CACHE.md | Services/PhoneFileCacheService.cs, PhoneFileCacheStore.cs, PhoneFileCacheKey.cs, Pages/BookshelfPage.Sync.cs |
 | 動画 / 音声 | `DESIGN.md` | `Platforms/Android/VideoPlayerActivity.cs`, `Pages/AudioPlayerPage.cs` |
 | 音声の持ち出し / Pixel Watch | `docs/WATCH_AUDIO.md` | `Pages/OfflineAudioPage.cs`, `src/CoffeeEagle.Offline/`, `src/CoffeeEagle.WearTransport/`, `src/CoffeeEagle.Wear/` |
 | LRC歌詞（スマホ・Watch） | `docs/LYRICS.md` | `AudioLyricsService.cs`, `LrcLyrics.cs`, `OfflineLyricsStore.cs`, `MainActivity.Lyrics.cs` |

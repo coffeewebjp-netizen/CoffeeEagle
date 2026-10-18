@@ -6,14 +6,16 @@ public sealed class EagleImageSourceService
 {
     private readonly AndroidDocumentTreeService _documents;
     private readonly GoogleDriveLibraryService _drive;
+    private readonly PhoneFileCacheService _phoneCache;
 
     public Task<byte[]?> ReadLyricsAsync(EagleAsset asset, CancellationToken ct) =>
-        new AudioLyricsService(_documents, _drive).ReadAsync(asset, ct);
+        new AudioLyricsService(_documents, _drive, _phoneCache).ReadAsync(asset, ct);
 
-    public EagleImageSourceService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive)
+    public EagleImageSourceService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive, PhoneFileCacheService phoneCache)
     {
         _documents = documents;
         _drive = drive;
+        _phoneCache = phoneCache;
     }
 
     public ImageSource? CreateThumbnailSource(EagleAsset asset)
@@ -21,7 +23,7 @@ public sealed class EagleImageSourceService
         var uri = asset.MediaKind == EagleAssetMediaKind.Image
             ? asset.ThumbnailUri ?? asset.FileUri
             : asset.ThumbnailUri;
-        return CreateContentSource(uri);
+        return CreateContentSource(asset, uri);
     }
 
     public async Task<string> GetPlaybackPathAsync(EagleAsset asset, CancellationToken cancellationToken = default)
@@ -32,11 +34,14 @@ public sealed class EagleImageSourceService
             throw new InvalidOperationException("開けるファイルがありません。");
         }
 
+        if (_phoneCache.TryGetCachedPath(asset, uri, out var cachedPath)) return cachedPath;
+
         if (GoogleDriveLibraryService.IsDriveFileUri(uri))
         {
-            return await _drive.GetCachedFilePathAsync(uri, cancellationToken);
+            return await _drive.GetCachedFilePathAsync(uri, PhoneFileCacheService.RevisionFor(asset, uri), cancellationToken);
         }
 
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var localUri) && localUri.IsFile) return localUri.LocalPath;
         return uri;
     }
 
@@ -48,9 +53,11 @@ public sealed class EagleImageSourceService
             return;
         }
 
+        if (_phoneCache.TryGetCachedPath(asset, uri, out _)) return;
+
         if (GoogleDriveLibraryService.IsDriveFileUri(uri))
         {
-            await _drive.GetCachedFilePathAsync(uri, cancellationToken);
+            await _drive.GetCachedFilePathAsync(uri, PhoneFileCacheService.RevisionFor(asset, uri), cancellationToken);
         }
     }
 
@@ -80,13 +87,24 @@ public sealed class EagleImageSourceService
         }
 
         var playbackPath = await GetPlaybackPathAsync(asset, cancellationToken);
-        VideoPlayerActivity.Start(playbackPath, asset.Name, GoogleDriveLibraryService.IsDriveFileUri(uri));
+        var isLocalPath = GoogleDriveLibraryService.IsDriveFileUri(uri)
+            || _phoneCache.TryGetCachedPath(asset, uri, out _)
+            || (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.IsFile);
+        VideoPlayerActivity.Start(playbackPath, asset.Name, isLocalPath);
     }
 
     public ImageSource? CreateFullSource(EagleAsset asset)
     {
-        return CreateContentSource(asset.FileUri ?? asset.ThumbnailUri);
+        return CreateContentSource(asset, asset.FileUri ?? asset.ThumbnailUri);
     }
+
+    public bool IsFilePathForAsset(EagleAsset asset) => IsFilePathForAsset(asset, asset.FileUri ?? asset.ThumbnailUri);
+
+    public bool IsFilePathForAsset(EagleAsset asset, string? uri) =>
+        !string.IsNullOrWhiteSpace(uri)
+        && (GoogleDriveLibraryService.IsDriveFileUri(uri)
+            || _phoneCache.TryGetCachedPath(asset, uri, out _)
+            || (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.IsFile));
 
     private static string ResolveMimeType(EagleAsset asset)
     {
@@ -99,7 +117,7 @@ public sealed class EagleImageSourceService
         };
     }
 
-    private ImageSource? CreateContentSource(string? uri)
+    private ImageSource? CreateContentSource(EagleAsset asset, string? uri)
     {
         if (string.IsNullOrWhiteSpace(uri))
         {
@@ -110,8 +128,9 @@ public sealed class EagleImageSourceService
         {
             try
             {
+                if (_phoneCache.TryGetCachedPath(asset, uri, out var cachedPath)) return File.OpenRead(cachedPath);
                 return GoogleDriveLibraryService.IsDriveFileUri(uri)
-                    ? _drive.OpenRead(uri)
+                    ? _drive.OpenRead(uri, PhoneFileCacheService.RevisionFor(asset, uri))
                     : _documents.OpenRead(uri);
             }
             catch

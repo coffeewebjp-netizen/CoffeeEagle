@@ -12,5 +12,7 @@
              Exclude="../../src/CoffeeEagle.Reader/Services/GoogleDriveLibraryService.Auth.cs"
              Link="Services/%(Filename)%(Extension)" />
     <Compile Include="../../src/CoffeeEagle.Reader/Services/EagleLibraryIndexer*.cs" Link="Services/%(Filename)%(Extension)" />
+    <Compile Include="../../src/CoffeeEagle.Reader/Services/PhoneFileCacheStore.cs" Link="Services/PhoneFileCacheStore.cs" />
+    <Compile Include="../../src/CoffeeEagle.Reader/Services/PhoneFileCacheKey.cs" Link="Services/PhoneFileCacheKey.cs" />
   </ItemGroup>
 </Project>

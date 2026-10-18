@@ -229,7 +229,7 @@ public sealed class AudioPlayerPage : ContentPage
             var activity = MainActivity.Current ?? throw new InvalidOperationException("Android activity is not ready.");
             var playbackPath = await _mediaSources.GetPlaybackPathAsync(asset);
             if (_disposed || generation != _trackGeneration) return;
-            var uri = GoogleDriveLibraryService.IsDriveFileUri(uriString)
+            var uri = _mediaSources.IsFilePathForAsset(asset, uriString)
                 ? null
                 : AndroidUri.Parse(playbackPath) ?? throw new InvalidOperationException("URIを読み取れませんでした。");
             _player = new MediaPlayer();

@@ -3,7 +3,7 @@ using CoffeeEagle.Reader.Models;
 
 namespace CoffeeEagle.Reader.Services;
 
-public sealed class AudioLyricsService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive)
+public sealed class AudioLyricsService(AndroidDocumentTreeService documents, GoogleDriveLibraryService drive, PhoneFileCacheService? phoneCache = null)
 {
     public async Task<byte[]?> ReadAsync(EagleAsset asset, CancellationToken ct)
     {
@@ -13,6 +13,11 @@ public sealed class AudioLyricsService(AndroidDocumentTreeService documents, Goo
             if (!File.Exists(path)) return null;
             await using var local = File.OpenRead(path);
             return await LrcLyrics.ReadAsync(local, ct);
+        }
+        if (phoneCache is not null)
+        {
+            var cached = await phoneCache.ReadCachedLyricsAsync(asset, ct);
+            if (cached.Known) return cached.Bytes;
         }
         if (GoogleDriveLibraryService.IsDriveFileUri(asset.FileUri ?? "")) return await drive.ReadLyricsAsync(asset, ct);
         if (Uri.TryCreate(asset.FileUri, UriKind.Absolute, out var uri) && uri.IsFile)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -42,6 +43,8 @@ public sealed partial class GoogleDriveLibraryService
     {
         ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".3gp", ".ts", ".mts", ".m2ts", ".flv", ".ogv"
     };
+
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> BrowsingCacheLocks = new(StringComparer.Ordinal);
 
 
     private readonly EagleLibraryStore _store;
@@ -132,12 +135,21 @@ public sealed partial class GoogleDriveLibraryService
 
     public Stream OpenRead(string uri)
     {
-        var path = GetCachedFilePathAsync(uri).GetAwaiter().GetResult();
+        return OpenRead(uri, "legacy");
+    }
+
+    public Stream OpenRead(string uri, string revision)
+    {
+        var path = GetCachedFilePathAsync(uri, revision).GetAwaiter().GetResult();
         return File.OpenRead(path);
     }
 
 
     public async Task<string> GetCachedFilePathAsync(string uri, CancellationToken cancellationToken = default)
+        => await GetCachedFilePathAsync(uri, "legacy", cancellationToken);
+
+
+    public async Task<string> GetCachedFilePathAsync(string uri, string revision, CancellationToken cancellationToken = default)
     {
         var fileId = ExtractFileId(uri);
         if (string.IsNullOrWhiteSpace(fileId))
@@ -154,32 +166,66 @@ public sealed partial class GoogleDriveLibraryService
 
         var cacheDirectory = Path.Combine(FileSystem.CacheDirectory, "drive-files");
         Directory.CreateDirectory(cacheDirectory);
-        var path = Path.Combine(cacheDirectory, fileId + extension.ToLowerInvariant());
-        if (File.Exists(path) && new FileInfo(path).Length > 0)
+        var normalizedExtension = extension.ToLowerInvariant();
+        var revisionKey = PhoneFileCacheStore.Hash(revision)[..24];
+        var path = Path.Combine(cacheDirectory, $"{fileId}-{revisionKey}{normalizedExtension}");
+        var gate = BrowsingCacheLocks.GetOrAdd(fileId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
         {
-            return path;
+            if (File.Exists(path) && new FileInfo(path).Length > 0)
+            {
+                RemoveOlderBrowsingCacheFiles(cacheDirectory, fileId, path);
+                return path;
+            }
+
+            var state = await _store.LoadAsync(cancellationToken);
+            var accessToken = await GetValidAccessTokenAsync(state, cancellationToken);
+            var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{DriveFilesUrl}/{Uri.EscapeDataString(fileId)}?alt=media&supportsAllDrives=true");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new InvalidOperationException($"Google Driveからファイルを取得できませんでした: HTTP {(int)response.StatusCode} / {GetErrorMessage(body)}");
+                }
+
+                await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
+                await using (var output = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
+                {
+                    await input.CopyToAsync(output, cancellationToken);
+                }
+
+                File.Move(tempPath, path, overwrite: true);
+                RemoveOlderBrowsingCacheFiles(cacheDirectory, fileId, path);
+                return path;
+            }
+            finally
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch (IOException) { }
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+
+    private static void RemoveOlderBrowsingCacheFiles(string cacheDirectory, string fileId, string currentPath)
+    {
+        foreach (var candidate in Directory.EnumerateFiles(cacheDirectory, fileId + "-*", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(candidate, currentPath, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(Path.GetExtension(candidate), ".tmp", StringComparison.OrdinalIgnoreCase)) continue;
+            try { File.Delete(candidate); } catch (IOException) { }
         }
 
-        var state = await _store.LoadAsync(cancellationToken);
-        var accessToken = await GetValidAccessTokenAsync(state, cancellationToken);
-        var tempPath = path + ".tmp";
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{DriveFilesUrl}/{Uri.EscapeDataString(fileId)}?alt=media&supportsAllDrives=true");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"Google Driveからファイルを取得できませんでした: HTTP {(int)response.StatusCode} / {GetErrorMessage(body)}");
-        }
-
-        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
-        await using (var output = File.Create(tempPath))
-        {
-            await input.CopyToAsync(output, cancellationToken);
-        }
-
-        File.Move(tempPath, path, overwrite: true);
-        return path;
+        var legacyPath = Path.Combine(cacheDirectory, fileId + Path.GetExtension(currentPath));
+        try { if (File.Exists(legacyPath)) File.Delete(legacyPath); } catch (IOException) { }
     }
 
     public async Task<EagleLibrary> IndexAsync(
@@ -262,6 +308,7 @@ public sealed partial class GoogleDriveLibraryService
                 .OrderByDescending(asset => asset.ModifiedAt ?? asset.CreatedAt ?? DateTimeOffset.MinValue)
                 .ThenBy(asset => asset.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList(),
+            PhoneCacheExcludedSourceInfoIds = previous?.PhoneCacheExcludedSourceInfoIds?.ToList() ?? [],
             SourceEntries = scan.SourceEntries
                 .OrderBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)
                 .ToList()

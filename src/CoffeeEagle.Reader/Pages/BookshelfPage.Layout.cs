@@ -58,11 +58,18 @@ public sealed partial class BookshelfPage
         controls.Children.Add(_searchBar);
         controls.Children.Add(_summaryLabel);
         controls.Children.Add(_syncStatusPanel);
-        controls.Children.Add(_offlineAudioButton);
+        var toolsRow = new Grid
+        {
+            ColumnDefinitions = { new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Star) },
+            ColumnSpacing = 8,
+            Children = { _offlineAudioButton, _phoneCacheButton }
+        };
+        Grid.SetColumn(_phoneCacheButton, 1);
+        controls.Children.Add(toolsRow);
         Grid.SetRow(_searchBar, 1);
         Grid.SetRow(_summaryLabel, 2);
         Grid.SetRow(_syncStatusPanel, 3);
-        Grid.SetRow(_offlineAudioButton, 4);
+        Grid.SetRow(toolsRow, 4);
 
         var listLayer = new Grid
         {

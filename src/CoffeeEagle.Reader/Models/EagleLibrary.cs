@@ -28,6 +28,8 @@ public sealed class EagleLibrary
 
     public List<EagleAsset> Assets { get; set; } = [];
 
+    public List<string> PhoneCacheExcludedSourceInfoIds { get; set; } = [];
+
     public List<EagleSourceEntry> SourceEntries { get; set; } = [];
 }
 

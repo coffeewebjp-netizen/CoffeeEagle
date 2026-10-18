@@ -22,7 +22,10 @@ public sealed partial class BookshelfPage : ContentPage
 
     private readonly GoogleDriveLibraryService _drive;
     private readonly OfflineAudioService _offlineAudio;
+    private readonly PhoneFileCacheService _phoneCache;
     private readonly Button _offlineAudioButton;
+    private readonly Button _phoneCacheButton;
+    private readonly Button _syncCancelButton;
 
     private readonly List<EagleLibrary> _libraries = [];
 
@@ -170,20 +173,28 @@ public sealed partial class BookshelfPage : ContentPage
 
     private long _syncGeneration;
 
+    private CancellationTokenSource? _phoneCacheCancellation;
+
 
     public BookshelfPage(
         EagleLibraryStore store,
         EagleLibraryIndexer indexer,
         EagleImageSourceService imageSources,
         GoogleDriveLibraryService drive,
-        OfflineAudioService offlineAudio)
+        OfflineAudioService offlineAudio,
+        PhoneFileCacheService phoneCache)
     {
         _store = store;
         _indexer = indexer;
         _imageSources = imageSources;
         _drive = drive;
         _offlineAudio = offlineAudio;
+        _phoneCache = phoneCache;
         _offlineAudioButton = CreateHeaderButton("音声の持ち出し / Watch");
+        _phoneCacheButton = CreateHeaderButton("端末キャッシュ");
+        _syncCancelButton = CreateHeaderButton("中止");
+        _syncCancelButton.IsVisible = false;
+        _syncCancelButton.Clicked += (_, _) => _phoneCacheCancellation?.Cancel();
         _offlineAudioButton.Clicked += async (_, _) =>
         {
             if (!_isBusy) await Navigation.PushAsync(new OfflineAudioPage(_offlineAudio, _activeLibrary, _visibleAssets.ToArray(), _imageSources, _store));
@@ -203,6 +214,7 @@ public sealed partial class BookshelfPage : ContentPage
         _syncStatusPanel = CreateSyncStatusPanel();
         _emptyActions = CreateEmptyActions();
         _libraryButton.Clicked += async (_, _) => await ShowLibraryMenuAsync();
+        _phoneCacheButton.Clicked += async (_, _) => await ShowPhoneCachePreferencesAsync();
         _folderButton.Clicked += async (_, _) => await ShowFolderMenuAsync();
         _tagButton.Clicked += async (_, _) => await ShowTagMenuAsync();
         _densityButton.Clicked += async (_, _) => await CycleDensityAsync();
@@ -539,6 +551,7 @@ public sealed partial class BookshelfPage : ContentPage
         _folderButton.IsEnabled = !isBusy;
         _tagButton.IsEnabled = !isBusy;
         _densityButton.IsEnabled = !isBusy;
+        _phoneCacheButton.IsEnabled = !isBusy;
         _googleDriveSelectButton.IsEnabled = !isBusy;
         _deviceFolderSelectButton.IsEnabled = !isBusy;
         if (!string.IsNullOrWhiteSpace(message))

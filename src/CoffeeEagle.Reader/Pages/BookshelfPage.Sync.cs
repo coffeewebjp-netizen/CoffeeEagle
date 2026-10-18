@@ -14,12 +14,14 @@ public sealed partial class BookshelfPage
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(GridLength.Auto)
             },
             ColumnSpacing = 8,
-            Children = { _syncPhaseLabel, _syncPercentLabel }
+            Children = { _syncPhaseLabel, _syncCancelButton, _syncPercentLabel }
         };
-        Grid.SetColumn(_syncPercentLabel, 1);
+        Grid.SetColumn(_syncCancelButton, 1);
+        Grid.SetColumn(_syncPercentLabel, 2);
 
         return new Border
         {
@@ -141,7 +143,8 @@ public sealed partial class BookshelfPage
     {
         _syncTimer?.Stop();
         var total = _lastSyncProgress?.Total;
-        var completed = total ?? _lastSyncProgress?.Completed;
+        var incompleteCachePass = phase.Contains("未保存分あり", StringComparison.Ordinal);
+        var completed = incompleteCachePass ? _lastSyncProgress?.Completed : total ?? _lastSyncProgress?.Completed;
         UpdateSyncStatus(new LibrarySyncProgress(
             phase,
             _lastSyncProgress?.Target,
@@ -192,6 +195,37 @@ public sealed partial class BookshelfPage
             : library.IndexMessage[start..];
     }
 
+
+    private async Task<PhoneFileCachePassResult> CachePhoneFilesAsync(EagleLibrary library)
+    {
+        _phoneCacheCancellation?.Dispose();
+        _phoneCacheCancellation = new CancellationTokenSource();
+        _syncCancelButton.IsVisible = true;
+        _syncCancelButton.IsEnabled = true;
+        _syncPhaseLabel.Text = "端末ファイルを自動保存中";
+        var generation = _syncGeneration;
+        var progress = new UiProgress<PhoneFileCacheProgress>(item =>
+        {
+            if (_acceptSyncProgress && generation == _syncGeneration)
+            {
+                UpdateSyncStatus(new LibrarySyncProgress("端末ファイルを自動保存中", item.Target, item.Completed, item.Total, item.Detail));
+            }
+        });
+        try
+        {
+            var token = _phoneCacheCancellation.Token;
+            return await Task.Run(() => _phoneCache.CacheLibraryAsync(library, progress, token), CancellationToken.None);
+        }
+        finally
+        {
+            _syncCancelButton.IsVisible = false;
+            _syncCancelButton.IsEnabled = false;
+            _phoneCacheCancellation.Dispose();
+            _phoneCacheCancellation = null;
+        }
+    }
+
+
     private async Task RefreshActiveLibraryAsync()
     {
         if (_activeLibrary is null)
@@ -220,6 +254,7 @@ public sealed partial class BookshelfPage
 
         var succeeded = false;
         string? completionDetail = null;
+        var completionPhase = "同期完了";
         BeginSyncStatus("Google Drive同期を開始中", previous?.Name ?? "EAGLEライブラリ");
         var progress = CreateSyncProgressReporter();
         SetBusy(true);
@@ -235,12 +270,14 @@ public sealed partial class BookshelfPage
             _state.SelectedTag = null;
             await SaveStateAsync();
             RefreshVisibleAssets();
+            var cacheResult = await CachePhoneFilesAsync(library);
+            completionDetail = $"{GetSyncCompletionDetail(library)}  |  {cacheResult.ToStatusDetail()}";
+            if (!cacheResult.Succeeded) completionPhase = "同期完了 / キャッシュに未保存分あり";
             if (library.Assets.Count == 0)
             {
                 await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
             }
 
-            completionDetail = GetSyncCompletionDetail(library);
             succeeded = true;
         }
         catch (GoogleDriveReconnectRequiredException ex)
@@ -277,7 +314,7 @@ public sealed partial class BookshelfPage
             SetBusy(false);
             if (succeeded)
             {
-                EndSyncStatus(detail: completionDetail);
+                EndSyncStatus(completionPhase, completionDetail);
             }
         }
     }
@@ -292,6 +329,7 @@ public sealed partial class BookshelfPage
 
         var succeeded = false;
         string? completionDetail = null;
+        var completionPhase = "同期完了";
         BeginSyncStatus("フォルダ同期を開始中", previous?.Name ?? "EAGLEライブラリ");
         var progress = CreateSyncProgressReporter();
         SetBusy(true);
@@ -308,12 +346,14 @@ public sealed partial class BookshelfPage
             _state.SelectedTag = null;
             await SaveStateAsync();
             RefreshVisibleAssets();
+            var cacheResult = await CachePhoneFilesAsync(library);
+            completionDetail = $"{GetSyncCompletionDetail(library)}  |  {cacheResult.ToStatusDetail()}";
+            if (!cacheResult.Succeeded) completionPhase = "同期完了 / キャッシュに未保存分あり";
             if (library.Assets.Count == 0)
             {
                 await DisplayAlertAsync("画像が見つかりません", library.IndexMessage, "OK");
             }
 
-            completionDetail = GetSyncCompletionDetail(library);
             succeeded = true;
         }
         catch (Exception ex)
@@ -326,7 +366,7 @@ public sealed partial class BookshelfPage
             SetBusy(false);
             if (succeeded)
             {
-                EndSyncStatus(detail: completionDetail);
+                EndSyncStatus(completionPhase, completionDetail);
             }
         }
     }

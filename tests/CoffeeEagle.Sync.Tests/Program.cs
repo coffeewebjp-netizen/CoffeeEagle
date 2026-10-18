@@ -29,9 +29,11 @@ await Test("switching two API libraries uses each source and preserves identity"
     foreach (var id in new[] { "folder-A", "folder-B", "folder-A" })
     {
         var previous = Existing(id);
+        previous.PhoneCacheExcludedSourceInfoIds = ["kept-exclusion"];
         var result = await service.IndexAsync(state, previous);
         Check(result.Id == previous.Id && result.RootDocumentId == id && result.Name == id, "library changed identity/source");
         Check(result.Assets.Single().Id == "asset-" + id, "assets from wrong source");
+        Check(result.PhoneCacheExcludedSourceInfoIds.SequenceEqual(new[] { "kept-exclusion" }), "Drive fresh index dropped cache exclusions");
     }
     Check(handler.RootReads.SequenceEqual(new[] { "folder-A", "folder-B", "folder-A" }), "wrong Drive root requests");
     Check(state.GoogleDriveFolderId == "folder-B", "last add input mutated");
@@ -70,6 +72,12 @@ await Test("genuinely empty library remains supported", async () =>
 {
     var result = await new EagleLibraryIndexer(new("{\"all\":0}")).IndexAsync("fixture");
     Check(result.Assets.Count == 0, "empty library failed");
+});
+await Test("SAF reindex preserves the per-library phone cache exclusions", async () =>
+{
+    var previous = new EagleLibrary { Id = "saf-existing", PhoneCacheExcludedSourceInfoIds = ["source-info"] };
+    var result = await new EagleLibraryIndexer(new("{\"all\":0}")).IndexAsync("fixture", previous);
+    Check(result.PhoneCacheExcludedSourceInfoIds.SequenceEqual(new[] { "source-info" }), "SAF fresh index dropped cache exclusions");
 });
 foreach (var (extension, kind) in new[] { ("mp4", EagleAssetMediaKind.Video), ("mp3", EagleAssetMediaKind.Audio) })
 {
@@ -128,6 +136,7 @@ await Test("filename-only metadata keeps a missing video retryable", async () =>
     Check(complete.Assets.Single().MediaKind == EagleAssetMediaKind.Video, "filename-only video not recovered");
 });
 await LyricsSyncTests.RunAsync(Test);
+await PhoneFileCacheTests.RunAsync(Test, Check);
 Console.WriteLine($"{passed}/{passed} checks passed");
 
 sealed class DriveFixture : HttpMessageHandler

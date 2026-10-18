@@ -9,6 +9,14 @@ public sealed partial class GoogleDriveLibraryService
 {
     public async Task<byte[]?> ReadLyricsAsync(EagleAsset asset, CancellationToken ct)
     {
+        var source = await FindLyricsSourceAsync(asset, ct);
+        if (source is null) return null;
+        await using var input = await OpenDownloadStreamAsync(source.Uri, ct);
+        return await LrcLyrics.ReadAsync(input, ct);
+    }
+
+    public async Task<PhoneLyricsSource?> FindLyricsSourceAsync(EagleAsset asset, CancellationToken ct)
+    {
         var state = await _store.LoadAsync(ct);
         var folderId = ExtractFolderId(asset.SourceDirectoryUri ?? "");
         if (string.IsNullOrWhiteSpace(folderId))
@@ -30,8 +38,9 @@ public sealed partial class GoogleDriveLibraryService
         if (original is null) throw new IOException("音声フォルダの一覧が不完全です。接続を確認して歌詞の更新を再試行してください。");
         var sibling = LrcLyrics.FindSibling(original.Name, files.Where(x => !x.IsFolder), x => x.Name);
         if (sibling is null) return null;
-        if (sibling.Size > LrcLyrics.MaxBytes) throw new InvalidDataException("歌詞ファイルは64 KB以内にしてください。");
-        await using var input = await OpenDownloadStreamAsync(BuildFileUri(sibling.Id, sibling.Name), ct);
-        return await LrcLyrics.ReadAsync(input, ct);
+        return new PhoneLyricsSource(BuildFileUri(sibling.Id, sibling.Name), sibling.Name, sibling.Size,
+            sibling.ModifiedAt?.ToUnixTimeMilliseconds() ?? 0);
     }
 }
+
+public sealed record PhoneLyricsSource(string Uri, string Name, long SizeBytes, long ModifiedStamp);

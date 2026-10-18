@@ -7,6 +7,47 @@ namespace CoffeeEagle.Reader.Pages;
 public sealed partial class BookshelfPage
 {
 
+    private async Task ShowPhoneCachePreferencesAsync()
+    {
+        var library = _activeLibrary;
+        if (library is null)
+        {
+            await DisplayAlertAsync("ライブラリがありません", "先にキャッシュしたいEAGLEライブラリを登録してください。", "OK");
+            return;
+        }
+
+        var items = library.Assets
+            .GroupBy(PhoneFileCacheService.ExclusionKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(asset => asset.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(asset => new PhoneCachePreferenceItem(
+                PhoneFileCacheService.ExclusionKey(asset),
+                string.IsNullOrWhiteSpace(asset.Name) ? asset.FileName : asset.Name,
+                $"{asset.MediaKind}  ·  {asset.FileName}"))
+            .ToList();
+        var popup = new PhoneCachePreferenceView(items, library.PhoneCacheExcludedSourceInfoIds);
+        var excluded = await ShowBottomSheetAsync(popup, popup.Completion, popup.Cancel);
+        if (excluded is null) return;
+
+        var previousExcluded = library.PhoneCacheExcludedSourceInfoIds;
+        library.PhoneCacheExcludedSourceInfoIds = excluded
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        try
+        {
+            await SaveStateAsync();
+        }
+        catch (Exception ex)
+        {
+            library.PhoneCacheExcludedSourceInfoIds = previousExcluded;
+            await DisplayAlertAsync(
+                "設定を保存できませんでした",
+                $"端末キャッシュの除外設定は変更されていません。再試行してください。\n{ex.Message}",
+                "OK");
+        }
+    }
+
     private async Task ShowFolderMenuAsync()
     {
         if (_activeLibrary is null)

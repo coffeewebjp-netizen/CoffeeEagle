@@ -94,6 +94,11 @@ public sealed class EagleLibraryStore
             library.IndexMessage ??= string.Empty;
             library.Folders ??= [];
             library.Assets ??= [];
+            library.PhoneCacheExcludedSourceInfoIds ??= [];
+            library.PhoneCacheExcludedSourceInfoIds = library.PhoneCacheExcludedSourceInfoIds
+                .Where(sourceInfoId => !string.IsNullOrWhiteSpace(sourceInfoId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             library.SourceEntries ??= [];
             foreach (var asset in library.Assets)
             {

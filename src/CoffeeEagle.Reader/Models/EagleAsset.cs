@@ -35,6 +35,13 @@ public sealed class EagleAsset
 
     public long SizeBytes { get; set; }
 
+    public long ThumbnailSizeBytes { get; set; }
+
+    // Provider file stamps are independent from the Eagle metadata/info-folder stamp.
+    public long SourceFileModifiedStamp { get; set; }
+
+    public long ThumbnailFileModifiedStamp { get; set; }
+
     public int Width { get; set; }
 
     public int Height { get; set; }

@@ -115,6 +115,7 @@ public sealed partial class EagleLibraryIndexer
                 .OrderByDescending(asset => asset.ModifiedAt ?? asset.CreatedAt ?? DateTimeOffset.MinValue)
                 .ThenBy(asset => asset.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList(),
+            PhoneCacheExcludedSourceInfoIds = previous?.PhoneCacheExcludedSourceInfoIds?.ToList() ?? [],
             SourceEntries = scan.SourceEntries
                 .OrderBy(entry => entry.SourceInfoId, StringComparer.OrdinalIgnoreCase)
                 .ToList()
